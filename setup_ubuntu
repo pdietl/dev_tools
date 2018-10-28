@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [[ $EUID -ne 0 ]]; then
+if [ "$EUID" -ne 0 ]; then
    show "This script must be run as root"
    exit 1
 fi
@@ -61,37 +61,30 @@ apt install ${pkg_list[@]} -y
 show "Done."
 
 show "Setting up Docker..."
-show "Adding user '$(who)' to docker group..."
-if groups | grep 'docker'; then
-    show "User '$(who)' is already a member of the docker group. Skipping!"
+show "Adding user '$(logname)' to docker group..."
+if groups $(logname) | grep 'docker'; then
+    show "User '$(logname)' is already a member of the docker group. Skipping!"
 else
-    usermod -a -G docker $(who | awk '{print $1}')
+    usermod -a -G docker $(logname)
 fi
-show "Done."
-show "Setting up access to ADTRAN Dockerfiles via insecure registries..."
-echo '{
-  "dns": ["172.22.48.48","172.22.48.47"],
-  "insecure-registries":["docker.adtran.com:5000"]
-}' > /etc/docker/daemon.json
 show "Done."
 show "Restarting Docker"
 systemctl daemon-reload
 systemctl restart docker.service
 show "Done."
 show "Sanity checking docker via docker.io..."
-docker run hello-world
-$? || show "ERROR! Docker is misconfigured. Please contact a human for help." && exit 1
-show "Done."
-show "Sanity checking docker via docker.adtran.com..."
-docker run docker.adtran.com:5000/hello-world
-$? || show "ERROR! Docker is misconfigured. Please contact a human for help." && exit 1
+docker run hello-world || { 
+	show "ERROR! Docker is misconfigured. Please contact a human for help."
+	exit 1
+	}
 show "Done."
 
 show "Installing default vimrc..."
 if [ -e ~/.vimrc ]; then 
 	show 'Already installed. Skipping...'
 else
-	echo 'set background=dark
+	cat > ~/.vimrc <<'EOF'
+set background=dark
 set nocompatible        " use vim extensions
 " Bells
 set visualbell t_vb=    " turn off error beep/flash
@@ -124,58 +117,13 @@ set listchars=eol:$,tab:>-,trail:~,extends:>,precedes:<
 noremap <F5> :set list!<CR>
 noremap <F6> :set number!<CR>
 noremap <F7> :setr paste!<CR>' > ~/.vimrc
+EOF
 fi
 
 show "Installing Python3 pacakges..."
 pip3 install meson conan
 show "Done."
 
-p4v_inst() {
-    set +e
-	show "Installing P4V..."
-	[ -e /opt/p4v* ] && show 'Already installed. Skipping...' && return
-	tmp=$(mktemp -d)
-	cd "$tmp"
-	wget 'http://www.perforce.com/downloads/perforce/r18.3/bin.linux26x86_64/p4v.tgz'
-	tar xvf p4v* -C /opt
-	x=$(echo -n /opt/p4v*/bin)
-	echo PATH=$x:\$PATH >> ~/.bashrc
-	rm -rf $tmp
-	show "Done."
-    set -e
-}
-
-p4_inst() {
-	show "Installing P4..."
-	[ -e /opt/p4_command_line ] && show 'Already installed. Skipping...' && return
-	mkdir -p /opt/p4_command_line
-	cd /opt/p4_command_line
-	wget 'http://www.perforce.com/downloads/perforce/r18.1/bin.linux26x86_64/p4'
-	chmod +x p4
-	echo PATH=/opt/p4_command_line:\$PATH >> ~/.bashrc
-	show "Done."
-}
-
-cc_inst() {
-	show "Installing Code Collaborator..."
-	[ -e /opt/ccollab* ] && show 'Already installed. Skipping...' && return
-	tmp=$(mktemp -d)
-	cd "$tmp"
-	wget 'https://s3.amazonaws.com/downloads.smartbear/collaborator/11.2.11201/ccollab_client_11_2_11201_unix.tar.gz'
-	tar xvf ccollab*.tar.gz -C /opt
-	x=$(echo -n /opt/ccollab*)
-	echo PATH=$x:\$PATH >> ~/.bashrc
-	rm -rf *tmp
-	show "Done."
-}
-
-p4v_inst
-p4_inst
-cc_inst
-
 echo "PS1='\w$ '" >> ~/.bashrc
-echo "P4PORT=p4gwdedge.adtran.com:1667" >> ~/.bashrc
 
-show "***********************************"
-show "*** Now log out and log back in ***"
-show "***********************************"
+echo "Log out and back in or source '~/.bashrc'"
