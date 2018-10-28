@@ -1,0 +1,181 @@
+#!/bin/bash
+
+if [[ $EUID -ne 0 ]]; then
+   show "This script must be run as root"
+   exit 1
+fi
+
+show() {
+    echo
+    echo "***"
+    echo "*** $@"
+    echo "***"
+    echo
+}
+
+show "Updating Package Lists..."
+apt update
+show "Done."
+show "Upgrading Existing Packages..."
+apt upgrade -y
+show "Done."
+
+show "Installing Debian Packages..."
+
+pkg_list=(
+    aptitude
+    build-essential
+    cmake
+    curl
+    ddd
+    docker.io
+    dos2unix
+    exuberant-ctags
+    fonts-dseg
+    gawk
+    ghc
+    graphviz
+    htop
+    indent
+    libssl-dev
+    nasm
+    net-tools
+    ninja-build
+    openjdk-8-jdk
+    openjdk-8-jdk-headless
+    openssh-server
+    python3-pip
+    python-pip
+    tcl
+    tcl-dev
+    tk8.6-dev
+    tree
+    uuid
+    uuid-dev
+    valac
+    vim
+    virtualenv
+)
+
+apt install ${pkg_list[@]} -y
+show "Done."
+
+show "Setting up Docker..."
+show "Adding user '$(who)' to docker group..."
+if groups | grep 'docker'; then
+    show "User '$(who)' is already a member of the docker group. Skipping!"
+else
+    usermod -a -G docker $(who | awk '{print $1}')
+fi
+show "Done."
+show "Setting up access to ADTRAN Dockerfiles via insecure registries..."
+echo '{
+  "dns": ["172.22.48.48","172.22.48.47"],
+  "insecure-registries":["docker.adtran.com:5000"]
+}' > /etc/docker/daemon.json
+show "Done."
+show "Restarting Docker"
+systemctl daemon-reload
+systemctl restart docker.service
+show "Done."
+show "Sanity checking docker via docker.io..."
+docker run hello-world
+$? || show "ERROR! Docker is misconfigured. Please contact a human for help." && exit 1
+show "Done."
+show "Sanity checking docker via docker.adtran.com..."
+docker run docker.adtran.com:5000/hello-world
+$? || show "ERROR! Docker is misconfigured. Please contact a human for help." && exit 1
+show "Done."
+
+show "Installing default vimrc..."
+if [ -e ~/.vimrc ]; then 
+	show 'Already installed. Skipping...'
+else
+	echo 'set background=dark
+set nocompatible        " use vim extensions
+" Bells
+set visualbell t_vb=    " turn off error beep/flash
+set novisualbell        " turn off visual bell
+" Editing info
+set number              "[same as nu] show line numbers
+set ruler               "[same as ru] show cursor position
+set showmode            "[same as smd] show when in insert mode
+" Search
+set hlsearch            " highlight searches
+"set incsearch           " do incremental searching
+" Auxilary files
+set nobackup            " do not keep a backup file (ending in ~)
+set noswapfile          " do not write a swap file
+" Smart editing
+set showmatch           "[same as sm] highlight matching (), {}, etc.
+"set nowrap              " do not wrap lines
+" Tabs and Indenting
+set autoindent          "[same as ai] always set autoindenting on
+set shiftwidth=4        "[same as sw] number of spaces to (auto)indent
+set tabstop=4           "[same as ts] number of spaces per tab
+set expandtab           "[same as et] use spaces instead of a tab
+set softtabstop=4       "[same as sts] number of spaces to use instead of a tab
+set smarttab            "[same as sta] <BS> deletes shiftwidth spaces from the start of a line
+" Syntax highlighting
+syntax enable 
+autocmd FileType make setlocal noexpandtab
+set tags=./tags,tags;
+set listchars=eol:$,tab:>-,trail:~,extends:>,precedes:<
+noremap <F5> :set list!<CR>
+noremap <F6> :set number!<CR>
+noremap <F7> :setr paste!<CR>' > ~/.vimrc
+fi
+
+show "Installing Python3 pacakges..."
+pip3 install meson conan
+show "Done."
+
+p4v_inst() {
+    set +e
+	show "Installing P4V..."
+	[ -e /opt/p4v* ] && show 'Already installed. Skipping...' && return
+	tmp=$(mktemp -d)
+	cd "$tmp"
+	wget 'http://www.perforce.com/downloads/perforce/r18.3/bin.linux26x86_64/p4v.tgz'
+	tar xvf p4v* -C /opt
+	x=$(echo -n /opt/p4v*/bin)
+	echo PATH=$x:\$PATH >> ~/.bashrc
+	rm -rf $tmp
+	show "Done."
+    set -e
+}
+
+p4_inst() {
+	show "Installing P4..."
+	[ -e /opt/p4_command_line ] && show 'Already installed. Skipping...' && return
+	mkdir -p /opt/p4_command_line
+	cd /opt/p4_command_line
+	wget 'http://www.perforce.com/downloads/perforce/r18.1/bin.linux26x86_64/p4'
+	chmod +x p4
+	echo PATH=/opt/p4_command_line:\$PATH >> ~/.bashrc
+	show "Done."
+}
+
+cc_inst() {
+	show "Installing Code Collaborator..."
+	[ -e /opt/ccollab* ] && show 'Already installed. Skipping...' && return
+	tmp=$(mktemp -d)
+	cd "$tmp"
+	wget 'https://s3.amazonaws.com/downloads.smartbear/collaborator/11.2.11201/ccollab_client_11_2_11201_unix.tar.gz'
+	tar xvf ccollab*.tar.gz -C /opt
+	x=$(echo -n /opt/ccollab*)
+	echo PATH=$x:\$PATH >> ~/.bashrc
+	rm -rf *tmp
+	show "Done."
+}
+
+p4v_inst
+p4_inst
+cc_inst
+
+echo "PS1='\w$ '" >> ~/.bashrc
+echo "P4PORT=p4gwdedge.adtran.com:1667" >> ~/.bashrc
+
+show "***********************************"
+show "*** Now log out and log back in ***"
+show "***********************************"
