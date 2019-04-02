@@ -1,10 +1,5 @@
 #!/bin/bash
 
-if [ "$EUID" -ne 0 ]; then
-   show "This script must be run as root"
-   exit 1
-fi
-
 show() {
     echo
     echo "***"
@@ -13,17 +8,38 @@ show() {
     echo
 }
 
+if [[ $EUID -ne 0 ]]; then
+   show "This script must be run as root"
+   exit 1
+fi
+
+declare -r REAL_USER=$(who | head -n 1 | awk '{ print $1 }')
+
+if grep -q 'ubuntu' /etc/os-release; then
+    update_pkgs='apt-get update'
+    upgrade_pkgs='apt-get upgrade -y'
+    pkg_list='pkg_list_ubuntu[@]'
+    install_pkgs='apt-get install -y'
+    clean_pkgs='apt-get autoremove -y'
+else
+    echo "Error: I don't think you're running Ubuntu and I only know how to initialize that system." >&2
+    exit 1
+fi
+
 show "Updating Package Lists..."
-apt update
+eval "$update_pkgs"
 show "Done."
 show "Upgrading Existing Packages..."
-apt upgrade -y
+eval "$upgrade_pkgs"
 show "Done."
 
-show "Installing Debian Packages..."
+show "Installing Packages..."
 
-pkg_list=(
+pkg_list_ubuntu=(
     aptitude
+    autoconf
+    autotools-dev
+    bison
     build-essential
     cmake
     curl
@@ -31,10 +47,7 @@ pkg_list=(
     docker.io
     dos2unix
     exuberant-ctags
-    fonts-dseg
     gawk
-    ghc
-    graphviz
     htop
     indent
     libssl-dev
@@ -46,45 +59,51 @@ pkg_list=(
     openssh-server
     python3-pip
     python-pip
-    tcl
-    tcl-dev
-    tk8.6-dev
+    p7zip-full
+    pv
+    shellcheck
     tree
     uuid
     uuid-dev
-    valac
+    valgrind
     vim
     virtualenv
 )
 
-apt install ${pkg_list[@]} -y
+eval "$install_pkgs ${!pkg_list}"
+show "Done."
+
+show "Cleaning up unused packages..."
+eval "$clean_pkgs"
+show "Done."
+
+show "Allowing no password when using sudo..."
+sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
 show "Done."
 
 show "Setting up Docker..."
-show "Adding user '$(logname)' to docker group..."
-if groups $(logname) | grep 'docker'; then
-    show "User '$(logname)' is already a member of the docker group. Skipping!"
+show "Adding user '$REAL_USER' to docker group..."
+if groups "$REAL_USER" | grep -q 'docker'; then
+    show "User '$REAL_USER' is already a member of the docker group. Skipping!"
 else
-    usermod -a -G docker $(logname)
+    usermod -a -G docker "$REAL_USER"
 fi
 show "Done."
-show "Restarting Docker"
-systemctl daemon-reload
-systemctl restart docker.service
-show "Done."
-show "Sanity checking docker via docker.io..."
-docker run hello-world || { 
-	show "ERROR! Docker is misconfigured. Please contact a human for help."
-	exit 1
-	}
+
+show "Sanity checking docker AS '$REAL_USER' via docker.io..."
+# We are running as root but we want to try
+#   running docker as the user who used sudo
+if ! su -c 'docker run hello-world' "$REAL_USER"; then
+    show "ERROR! Docker is misconfigured. Please contact a human for help."
+    exit 1
+fi
 show "Done."
 
 show "Installing default vimrc..."
-if [ -e ~/.vimrc ]; then 
-	show 'Already installed. Skipping...'
+if [ -e "/home/$REAL_USER/.vimrc" ]; then 
+    show 'Already installed. Skipping...'
 else
-	cat > ~/.vimrc <<'EOF'
-set background=dark
+    echo 'set background=dark
 set nocompatible        " use vim extensions
 " Bells
 set visualbell t_vb=    " turn off error beep/flash
@@ -116,14 +135,19 @@ set tags=./tags,tags;
 set listchars=eol:$,tab:>-,trail:~,extends:>,precedes:<
 noremap <F5> :set list!<CR>
 noremap <F6> :set number!<CR>
-noremap <F7> :setr paste!<CR>' > ~/.vimrc
-EOF
+noremap <F7> :set paste!<CR>' > "/home/$REAL_USER/.vimrc"
+chown $REAL_USER:$REAL_USER /home/$REAL_USER/.vimrc
 fi
 
 show "Installing Python3 pacakges..."
 pip3 install meson conan
 show "Done."
 
-echo "PS1='\w$ '" >> ~/.bashrc
+echo "PS1='\w$ '" >> "/home/$REAL_USER/.bashrc"
+echo '[user]
+name = Pete Dietl
+email = petedietl@gmail.com' > $HOME/.gitconfig
 
-echo "Log out and back in or source '~/.bashrc'"
+chown $REAL_USER:$REAL_USER $HOME/.gitconfig
+
+show "Now log out and log back in; maybe you'll have to restart"
