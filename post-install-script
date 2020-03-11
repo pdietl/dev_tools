@@ -60,7 +60,7 @@ else
         /etc/pete-bootstrap/cscope_maps.vim
 fi
 
-if ! grep -q 'PS1=' /home/$SUDO_USER/.bashrc; then
+if ! [ -e "/home/$SUDO_USER/.bashrc" ] || ! grep -q 'PS1=' /home/$SUDO_USER/.bashrc; then
     echo "PS1='\w$ '" >> "/home/$SUDO_USER/.bashrc"
 fi
 
