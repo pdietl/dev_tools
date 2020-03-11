@@ -1,0 +1,71 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+
+show() {
+    echo
+    echo "***"
+    echo "*** $@"
+    echo "***"
+    echo
+}
+
+if [[ $EUID -ne 0 ]]; then
+   show "This script must be run as root"
+   exit 1
+fi
+
+if [ -z "${SUDO_USER:-}" ]; then
+    echo "ERROR! The 'SUDO_USER' variable is blank! I was depending on that to determine who called me. :(" >&2
+    exit 1
+fi
+
+if ! grep -q 'ubuntu' /etc/os-release; then
+    echo "Error: I don't think you're running Ubuntu and I only know how to initialize that system." >&2
+    exit 1
+fi
+
+show "Allowing no password when using sudo..."
+sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
+show "Done."
+
+show "Setting up Docker..."
+show "Adding user '$SUDO_USER' to docker group..."
+if groups "$SUDO_USER" | grep -q 'docker'; then
+    show "User '$SUDO_USER' is already a member of the docker group. Skipping!"
+else
+    usermod -a -G docker "$SUDO_USER"
+fi
+show "Done."
+
+show "Sanity checking docker AS '$SUDO_USER' via docker.io..."
+
+# We are running as root but we want to try
+# running docker as the user who used sudo
+if ! su -c 'docker run hello-world' "$SUDO_USER"; then
+    show "ERROR! Docker is misconfigured. Please contact a human for help."
+    exit 1
+fi
+show "Done."
+
+show "Installing default vimrc..."
+if [ -e "/home/$SUDO_USER/.vimrc" ]; then 
+    show 'Already installed. Skipping...'
+else
+    install --owner $SUDO_USER --group $SUDO_USER \
+        /etc/pete-bootstrap/vimrc /home/$SUDO_USER/.vimrc
+    install --owner $SUDO_USER --group $SUDO_USER \
+        -Dt /home/$SUDO_USER/.vim/plugins/ \
+        /etc/pete-bootstrap/cscope_maps.vim
+fi
+
+if ! grep -q 'PS1=' /home/$SUDO_USER/.bashrc; then
+    echo "PS1='\w$ '" >> "/home/$SUDO_USER/.bashrc"
+fi
+
+if ! [ -e /home/$SUDO_USER/.gitconfig ]; then
+    echo '[user]
+name = Pete Dietl
+email = petedietl@gmail.com' > /home/$SUDO_USER/.gitconfig
+fi
