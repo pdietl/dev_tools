@@ -13,7 +13,7 @@ ifeq ($(ROOT),)
 endif
 DOCKER_ARGS += $(DOCKER_TAG)
 
-PKG_VER  := 1.0
+PKG_VER  := 1.1
 PKG_ARCH := all
 PKG_NAME := pete-bootstrap
 
@@ -73,7 +73,7 @@ $(DEB_NAME): Makefile post-install-script $(addprefix pkg_root/etc/pete-bootstra
 
 .PHONY: clean
 clean:
-	$(RM) $(DEB_NAME)
+	$(RM) $(PKG_NAME)_*
 
 docker-shell:
 	docker run -ti $(DOCKER_ARGS) /bin/bash
