@@ -18,7 +18,7 @@ PKG_ARCH := all
 PKG_NAME := pete-bootstrap
 
 DEP_LIST := \
-	aptitude \
+    aptitude \
     autoconf \
     autotools-dev \
     bison \
@@ -53,7 +53,7 @@ DEP_LIST := \
 
 DEB_NAME := $(PKG_NAME)_$(PKG_VER)_$(PKG_ARCH).deb
 
-.PHONY: add deb
+.PHONY: all build deb
 all build deb: $(DEB_NAME)
 
 $(DEB_NAME): Makefile post-install-script $(addprefix pkg_root/etc/pete-bootstrap/,cscope_maps.vim vimrc)
@@ -75,11 +75,13 @@ $(DEB_NAME): Makefile post-install-script $(addprefix pkg_root/etc/pete-bootstra
 clean:
 	$(RM) $(PKG_NAME)_*
 
+.PHONY: docker-shell
 docker-shell:
 	docker run -ti $(DOCKER_ARGS) /bin/bash
 
 docker-%:
 	docker run $(DOCKER_ARGS) $(MAKE) $* $(MAKEFLAGS)
 
+.PHONY: docker-build-image
 build-docker-image:
 	docker build -t $(DOCKER_TAG) .
