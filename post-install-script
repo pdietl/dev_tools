@@ -60,6 +60,10 @@ else
         /etc/pete-bootstrap/cscope_maps.vim
 fi
 
+show "Setting GNOME to use 12-hr time..."
+gsettings set org.gnome.desktop.interface clock-format '12h'
+show "Done."
+
 echo "PS1='\w$ '" >> "/home/$SUDO_USER/.bashrc"
 
 if ! [ -e /home/$SUDO_USER/.gitconfig ]; then
