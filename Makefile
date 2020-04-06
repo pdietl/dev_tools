@@ -54,7 +54,7 @@ DEP_LIST := \
 DEB_NAME := $(PKG_NAME)_$(PKG_VER)_$(PKG_ARCH).deb
 
 .PHONY: add deb
-all deb: $(DEB_NAME)
+all build deb: $(DEB_NAME)
 
 $(DEB_NAME): Makefile post-install-script $(addprefix pkg_root/etc/pete-bootstrap/,cscope_maps.vim vimrc)
 	fpm --input-type dir \
@@ -81,5 +81,5 @@ docker-shell:
 docker-%:
 	docker run $(DOCKER_ARGS) $(MAKE) $* $(MAKEFLAGS)
 
-docker-build:
+build-docker-image:
 	docker build -t $(DOCKER_TAG) .
