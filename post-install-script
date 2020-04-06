@@ -64,6 +64,10 @@ show "Setting GNOME to use 12-hr time..."
 gsettings set org.gnome.desktop.interface clock-format '12h'
 show "Done."
 
+show "Removing useless home directories..."
+rm -rf /home/$SUDO_USER/{Public,Templates,Videos,Pictures,Music}
+show "Done."
+
 echo "PS1='\w$ '" >> "/home/$SUDO_USER/.bashrc"
 
 if ! [ -e /home/$SUDO_USER/.gitconfig ]; then
