@@ -13,7 +13,7 @@ ifeq ($(ROOT),)
 endif
 DOCKER_ARGS += $(DOCKER_TAG)
 
-PKG_VER  := 1.1
+PKG_VER  := 1.2
 PKG_ARCH := all
 PKG_NAME := pete-bootstrap
 
