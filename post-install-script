@@ -69,6 +69,7 @@ rm -rf /home/$SUDO_USER/{Public,Templates,Videos,Pictures,Music}
 show "Done."
 
 echo "PS1='\w$ '" >> "/home/$SUDO_USER/.bashrc"
+echo "PATH='\$HOME/bin:\$PATH'" >> "/home/$SUDO_USER/.bashrc"
 
 if ! [ -e /home/$SUDO_USER/.gitconfig ]; then
 echo '[user]
