@@ -1,0 +1,8 @@
+show "Installing autossh..."
+install --owner $SUDO_USER --group $SUDO_USER \
+	/etc/pete-bootstrap/autossh /etc/systemd/system/autossh.service
+install --owner $SUDO_USER --group $SUDO_USER \
+	/etc/pete-bootstrap/autossh2 /etc/systemd/system/autossh2.service
+systemctl enable autossh
+systemctl enable autossh2
+show "Done."

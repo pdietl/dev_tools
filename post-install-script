@@ -11,6 +11,21 @@ show() {
     echo
 }
 
+file_append_line() {
+    local file=$1
+    local line=$2
+
+    echo -n "Checking file '$file' for line '$line'... "
+
+    if ! $(grep -q "$line" "$file"); then
+        echo "no"
+        echo "Appending line '$line' to file '$file'"
+        echo "$line" >> "$file"
+    else
+        echo "yes"
+    fi
+}
+
 if [[ $EUID -ne 0 ]]; then
    show "This script must be run as root"
    exit 1
@@ -50,7 +65,7 @@ fi
 show "Done."
 
 show "Installing default vimrc..."
-if [ -e "/home/$SUDO_USER/.vimrc" ]; then 
+if [ -e "/home/$SUDO_USER/.vimrc" ]; then
     show 'Already installed. Skipping...'
 else
     install --owner $SUDO_USER --group $SUDO_USER \
@@ -58,6 +73,16 @@ else
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt /home/$SUDO_USER/.vim/pack/plugins/start/cscope/plugin/ \
         /etc/pete-bootstrap/cscope_maps.vim
+show "Done."
+fi
+
+show "Installing default tmux conf..."
+if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
+    show 'Already installed. Skipping...'
+else
+    install --owner $SUDO_USER --group $SUDO_USER \
+        /etc/pete-bootstrap/tmux.conf /home/$SUDO_USER/.tmux.conf
+show "Done."
 fi
 
 show "Setting GNOME to use 12-hr time..."
@@ -68,8 +93,15 @@ show "Removing useless home directories..."
 rm -rf /home/$SUDO_USER/{Public,Templates,Videos,Pictures,Music}
 show "Done."
 
-echo "PS1='\w$ '" >> "/home/$SUDO_USER/.bashrc"
-echo "PATH='\$HOME/bin:\$PATH'" >> "/home/$SUDO_USER/.bashrc"
+show "Setting bashrc and profile paths and prompts..."
+file_append_line "/home/$SUDO_USER/.bashrc" "PS1='\w$ '"
+file_append_line "/home/$SUDO_USER/.bashrc" "PATH='\$HOME/bin:\$PATH'"
+file_append_line "/home/$SUDO_USER/.profile" "PS1='\h \w$ '"
+show "done"
+
+show "Installing Rust and Cargo..."
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+show "done"
 
 if ! [ -e /home/$SUDO_USER/.gitconfig ]; then
 echo '[user]

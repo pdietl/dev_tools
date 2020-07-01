@@ -18,45 +18,84 @@ PKG_ARCH := all
 PKG_NAME := pete-bootstrap
 
 DEP_LIST := \
-    aptitude \
-    autoconf \
-    autotools-dev \
-    bison \
-    build-essential \
-    cmake \
-    curl \
-    ddd \
-    docker.io \
-    dos2unix \
-    exuberant-ctags \
-    gawk \
-    htop \
-    indent \
-    libssl-dev \
-    nasm \
-    net-tools \
-    ninja-build \
-    openjdk-8-jdk \
-    openjdk-8-jdk-headless \
-    openssh-server \
-    python3-pip \
-    python-pip \
-    p7zip-full \
-    pv \
-    shellcheck \
-    tree \
-    uuid \
-    uuid-dev \
-    valgrind \
-    vim \
-    virtualenv
+	aptitude \
+	asciinema \
+	autoconf \
+	autopoint \
+	autossh \
+	autotools-dev \
+	aws-shell \
+	bison \
+	build-essential \
+	ccache \
+	clang-format \
+	cmake \
+	cppcheck \
+	cpuinfo \
+	cscope \
+	curl \
+	ddd \
+	docker.io \
+	dos2unix \
+	exuberant-ctags \
+	flex \
+	gawk \
+	gparted \
+	graphviz \
+	htop \
+	hub \
+	hwinfo \
+	indent \
+	jq \
+	libssl-dev \
+	libvirt-dev \
+	nasm \
+	net-tools \
+	ninja-build \
+	openjdk-8-jdk \
+	openjdk-8-jdk-headless \
+	openssh-server \
+	openssh-server \
+	p7zip-full \
+	packer \
+	pv \
+	python3-pip \
+	python3-stestr \
+	python3-venv \
+	qemu \
+	qemu-kvm \
+	qemu-system-x86 \
+	remake \
+	rlwrap \
+	ronn \
+	rpm \
+	ruby \
+	ruby-dev \
+	shellcheck \
+	sshfs \
+	texinfo \
+	tmate \
+	tmux \
+	tree \
+	uuid \
+	uuid-dev \
+	valgrind \
+	vim \
+	virtualenv \
+	zlib1g-dev
+
+ifneq ($(AUTOSSH),)
+    $(shell cat post-install-script install_autossh > post-install-script-final)
+else
+    $(shell cp post-install-script post-install-script-final)
+endif
 
 DEB_NAME := $(PKG_NAME)_$(PKG_VER)_$(PKG_ARCH).deb
 
 .PHONY: all build deb
 all build deb: $(DEB_NAME)
 
-$(DEB_NAME): Makefile post-install-script $(addprefix pkg_root/etc/pete-bootstrap/,cscope_maps.vim vimrc)
+$(DEB_NAME): Makefile post-install-script install_autossh $(addprefix pkg_root/etc/pete-bootstrap/,cscope_maps.vim vimrc autossh.service autossh2.service tmux.conf)
 	fpm --input-type dir \
 		--output-type deb \
 		--maintainer 'Pete Dietl' \
@@ -67,13 +106,13 @@ $(DEB_NAME): Makefile post-install-script $(addprefix pkg_root/etc/pete-bootstra
 		--url 'https://github.com/pdietl/dev_tools' \
 		--architecture $(PKG_ARCH) \
 		$(addprefix --depends ,$(DEP_LIST)) \
-		--after-install post-install-script \
+		--after-install post-install-script-final \
 		--force \
 		-C pkg_root
 
 .PHONY: clean
 clean:
-	$(RM) $(PKG_NAME)_*
+	$(RM) $(PKG_NAME)_* post-instapp-script-final
 
 .PHONY: docker-shell
 docker-shell:
