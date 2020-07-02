@@ -11,15 +11,18 @@ show() {
     echo
 }
 
+show_done() {
+    show "Done."
+}
+
 file_append_line() {
     local file=$1
     local line=$2
 
     echo -n "Checking file '$file' for line '$line'... "
 
-    if ! $(grep -q "$line" "$file"); then
-        echo "no"
-        echo "Appending line '$line' to file '$file'"
+    if ! $(grep -q -F "$line" "$file"); then
+        echo "no, appending"
         echo "$line" >> "$file"
     else
         echo "yes"
@@ -43,7 +46,7 @@ fi
 
 show "Allowing no password when using sudo..."
 sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
-show "Done."
+show_done
 
 show "Setting up Docker..."
 show "Adding user '$SUDO_USER' to docker group..."
@@ -51,8 +54,8 @@ if groups "$SUDO_USER" | grep -q 'docker'; then
     show "User '$SUDO_USER' is already a member of the docker group. Skipping!"
 else
     usermod -a -G docker "$SUDO_USER"
+    show_done
 fi
-show "Done."
 
 show "Sanity checking docker AS '$SUDO_USER' via docker.io..."
 
@@ -62,46 +65,59 @@ if ! su -c 'docker run hello-world' "$SUDO_USER"; then
     show "ERROR! Docker is misconfigured. Please contact a human for help."
     exit 1
 fi
-show "Done."
+show_done
 
 show "Installing default vimrc..."
 if [ -e "/home/$SUDO_USER/.vimrc" ]; then
-    show 'Already installed. Skipping...'
+    show 'Already installed. Skipping!'
 else
     install --owner $SUDO_USER --group $SUDO_USER \
         /etc/pete-bootstrap/vimrc /home/$SUDO_USER/.vimrc
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt /home/$SUDO_USER/.vim/pack/plugins/start/cscope/plugin/ \
         /etc/pete-bootstrap/cscope_maps.vim
-show "Done."
+    show_done
 fi
 
 show "Installing default tmux conf..."
 if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
-    show 'Already installed. Skipping...'
+    show 'Already installed. Skipping!'
 else
     install --owner $SUDO_USER --group $SUDO_USER \
         /etc/pete-bootstrap/tmux.conf /home/$SUDO_USER/.tmux.conf
-show "Done."
+    show_done
 fi
 
 show "Setting GNOME to use 12-hr time..."
 gsettings set org.gnome.desktop.interface clock-format '12h'
-show "Done."
+show_done
 
 show "Removing useless home directories..."
 rm -rf /home/$SUDO_USER/{Public,Templates,Videos,Pictures,Music}
-show "Done."
+show_done
 
 show "Setting bashrc and profile paths and prompts..."
 file_append_line "/home/$SUDO_USER/.bashrc" "PS1='\w$ '"
-file_append_line "/home/$SUDO_USER/.bashrc" "PATH='\$HOME/bin:\$PATH'"
+file_append_line "/home/$SUDO_USER/.bashrc" 'PATH=$HOME/bin:$PATH'
 file_append_line "/home/$SUDO_USER/.profile" "PS1='\h \w$ '"
-show "done"
+show_done
 
 show "Installing Rust and Cargo..."
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-show "done"
+file_append_line "/home/$SUDO_USER/.bashrc" '. $HOME/.cargo/env'
+show_done
+
+declare -r RESET_DEST=/home/$SUDO_USER/bin
+
+show "Installing 'reset' script to $RESET_DEST..."
+if ! [ -e "$RESET_DEST" ]; then
+    install --owner $SUDO_USER --group $SUDO_USER \
+        -Dt "$RESET_DEST" \
+        /etc/pete-bootstrap/reset
+    show_done
+else
+    show "$RESET_DEST/reset already exists. Skipping!"
+fi
 
 if ! [ -e /home/$SUDO_USER/.gitconfig ]; then
 echo '[user]

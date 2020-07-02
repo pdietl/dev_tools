@@ -48,6 +48,7 @@ DEP_LIST := \
 	indent \
 	jq \
 	libssl-dev \
+	libvirt-clients \
 	libvirt-dev \
 	nasm \
 	net-tools \
