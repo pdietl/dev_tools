@@ -44,6 +44,81 @@ if ! grep -q 'ubuntu' /etc/os-release; then
     exit 1
 fi
 
+show "Updating packages..."
+apt-get update
+apt-get upgrade -y
+show_done
+
+show "Installing packages..."
+apt-get install -y \
+	aptitude \
+        asciinema \
+        autoconf \
+        autopoint \
+        autossh \
+        autotools-dev \
+        aws-shell \
+        bison \
+        build-essential \
+        ccache \
+        clang-format \
+        cmake \
+        cppcheck \
+        cpuinfo \
+        cscope \
+        curl \
+        ddd \
+        docker.io \
+        dos2unix \
+        exuberant-ctags \
+        flex \
+        gawk \
+        gparted \
+        graphviz \
+        htop \
+        hub \
+        hwinfo \
+        indent \
+        jq \
+        libssl-dev \
+        libvirt-clients \
+        libvirt-dev \
+        nasm \
+        net-tools \
+        ninja-build \
+        openjdk-8-jdk \
+        openjdk-8-jdk-headless \
+        openssh-server \
+        openssh-server \
+        p7zip-full \
+        packer \
+        pv \
+        python3-pip \
+        python3-stestr \
+        python3-venv \
+        qemu \
+        qemu-kvm \
+        qemu-system-x86 \
+        remake \
+        rlwrap \
+        ronn \
+        rpm \
+        ruby \
+        ruby-dev \
+        shellcheck \
+        sshfs \
+        texinfo \
+        tmate \
+        tmux \
+        tree \
+        uuid \
+        uuid-dev \
+        valgrind \
+        vim \
+        virtualenv \
+        zlib1g-dev
+show_done
+
 show "Allowing no password when using sudo..."
 sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
 show_done
@@ -72,10 +147,10 @@ if [ -e "/home/$SUDO_USER/.vimrc" ]; then
     show 'Already installed. Skipping!'
 else
     install --owner $SUDO_USER --group $SUDO_USER \
-        /etc/pete-bootstrap/vimrc /home/$SUDO_USER/.vimrc
+        vimrc /home/$SUDO_USER/.vimrc
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt /home/$SUDO_USER/.vim/pack/plugins/start/cscope/plugin/ \
-        /etc/pete-bootstrap/cscope_maps.vim
+        cscope_maps.vim
     show_done
 fi
 
@@ -84,7 +159,7 @@ if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
     show 'Already installed. Skipping!'
 else
     install --owner $SUDO_USER --group $SUDO_USER \
-        /etc/pete-bootstrap/tmux.conf /home/$SUDO_USER/.tmux.conf
+        tmux.conf /home/$SUDO_USER/.tmux.conf
     show_done
 fi
 
@@ -103,7 +178,7 @@ file_append_line "/home/$SUDO_USER/.profile" "PS1='\h \w$ '"
 show_done
 
 show "Installing Rust and Cargo..."
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo -u "$SUDO_USER" -- sh -s -- -y
 file_append_line "/home/$SUDO_USER/.bashrc" '. $HOME/.cargo/env'
 show_done
 
@@ -113,7 +188,7 @@ show "Installing 'reset' script to $RESET_DEST..."
 if ! [ -e "$RESET_DEST" ]; then
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt "$RESET_DEST" \
-        /etc/pete-bootstrap/reset
+        reset
     show_done
 else
     show "$RESET_DEST/reset already exists. Skipping!"
