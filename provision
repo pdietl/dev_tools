@@ -64,7 +64,6 @@ apt-get install -y \
         clang-format \
         cmake \
         cppcheck \
-        cpuinfo \
         cscope \
         curl \
         ddd \
@@ -76,7 +75,6 @@ apt-get install -y \
         gparted \
         graphviz \
         htop \
-        hub \
         hwinfo \
         indent \
         jq \
@@ -101,7 +99,6 @@ apt-get install -y \
         qemu-system-x86 \
         remake \
         rlwrap \
-        ronn \
         rpm \
         ruby \
         ruby-dev \
@@ -163,9 +160,11 @@ else
     show_done
 fi
 
-show "Setting GNOME to use 12-hr time..."
-gsettings set org.gnome.desktop.interface clock-format '12h'
-show_done
+if which gsettings; then
+    show "Setting GNOME to use 12-hr time..."
+    gsettings set org.gnome.desktop.interface clock-format '12h'
+    show_done
+fi
 
 show "Removing useless home directories..."
 rm -rf /home/$SUDO_USER/{Public,Templates,Videos,Pictures,Music}
