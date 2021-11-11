@@ -148,6 +148,7 @@ else
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt /home/$SUDO_USER/.vim/pack/plugins/start/cscope/plugin/ \
         cscope_maps.vim
+    chown $SUDO_USER:$SUDO_USER -R /home/$SUDO_USER/.vim
     show_done
 fi
 
@@ -188,15 +189,17 @@ if ! [ -e "$RESET_DEST" ]; then
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt "$RESET_DEST" \
         reset
+    chown $SUDO_USER:$SUDO_USER -R /home/$SUDO_USER/bin
     show_done
 else
     show "$RESET_DEST/reset already exists. Skipping!"
 fi
 
 if ! [ -e /home/$SUDO_USER/.gitconfig ]; then
-echo '[user]
+    echo '[user]
     name = Pete Dietl
     email = petedietl@gmail.com
 [core]
     editor = vim' > /home/$SUDO_USER/.gitconfig
+    chown $SUDO_USER:$SUDO_USER /home/$SUDO_USER/.gitconfig
 fi
