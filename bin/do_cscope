@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -eu
+
+find . -name '*.[ch]' -exec realpath {} \; > cscope.files
+
+cscope -q -b

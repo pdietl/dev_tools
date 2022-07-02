@@ -182,17 +182,17 @@ sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.r
 file_append_line "/home/$SUDO_USER/.bashrc" '. $HOME/.cargo/env'
 show_done
 
-declare -r RESET_DEST=/home/$SUDO_USER/bin
+declare -r BIN_DEST=/home/$SUDO_USER/bin
 
-show "Installing 'reset' script to $RESET_DEST..."
-if ! [ -e "$RESET_DEST" ]; then
+show "Installing user binaries into $BIN_DEST..."
+if ! [ -e "$BIN_DEST" ]; then
     install --owner $SUDO_USER --group $SUDO_USER \
-        -Dt "$RESET_DEST" \
-        reset
-    chown $SUDO_USER:$SUDO_USER -R /home/$SUDO_USER/bin
+        -Dt "$BIN_DEST" \
+        bin/*
+    chown $SUDO_USER:$SUDO_USER -R "$BIN_DEST"
     show_done
 else
-    show "$RESET_DEST/reset already exists. Skipping!"
+    show "$BIN_DEST already exists. Skipping!"
 fi
 
 if ! [ -e /home/$SUDO_USER/.gitconfig ]; then

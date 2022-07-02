@@ -1,0 +1,27 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+
+list_output=$(usbipd.exe list | sed '/^Persisted:/,$d')
+
+attach_dev() {
+    local name=$1
+    local linux_search_string=$2
+    local windows_search_string=$3
+
+    if ! lsusb | grep -q "$linux_search_string"; then
+        if dev_line=$(grep -m1 "$windows_search_string" <<< "$list_output"); then
+            busid=$(awk '{print $1}' <<< "$dev_line")
+            echo "Attaching $name (busid = $busid)"
+            usbipd.exe wsl attach --busid "$busid"
+        else
+            echo "Could not find '$windows_search_string' in device list!"
+        fi
+    else
+        echo "$name already attached"
+    fi
+}
+
+attach_dev "serial" "FT232" "USB Serial Converter"
+attach_dev "st-link" "STLINK-V3" "ST-Link Debug"
