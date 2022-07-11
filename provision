@@ -57,7 +57,6 @@ apt-get install -y \
         autopoint \
         autossh \
         autotools-dev \
-        aws-shell \
         bison \
         build-essential \
         ccache \
@@ -90,6 +89,7 @@ apt-get install -y \
         openssh-server \
         p7zip-full \
         packer \
+        picocom \
         pv \
         python3-pip \
         python3-stestr \
@@ -173,7 +173,7 @@ show_done
 
 show "Setting bashrc and profile paths and prompts..."
 file_append_line "/home/$SUDO_USER/.bashrc" "PS1='\w$ '"
-file_append_line "/home/$SUDO_USER/.bashrc" 'PATH=$HOME/bin:$PATH'
+file_append_line "/home/$SUDO_USER/.bashrc" 'PATH=$HOME/bin:$HOME/.local/bin:$PATH'
 file_append_line "/home/$SUDO_USER/.profile" "PS1='\h \w$ '"
 show_done
 
