@@ -44,6 +44,8 @@ if ! grep -q 'ubuntu' /etc/os-release; then
     exit 1
 fi
 
+declare -r USER_HOME=/home/$SUDO_USER
+
 show "Updating packages..."
 apt-get update
 apt-get upgrade -y
@@ -167,22 +169,42 @@ if which gsettings; then
     show_done
 fi
 
+declare -r USER_RC=$USER_HOME/.bashrc
+
 show "Removing useless home directories..."
 rm -rf /home/$SUDO_USER/{Public,Templates,Videos,Pictures,Music}
 show_done
 
-show "Setting bashrc and profile paths and prompts..."
-file_append_line "/home/$SUDO_USER/.bashrc" "PS1='\w$ '"
-file_append_line "/home/$SUDO_USER/.bashrc" 'PATH=$HOME/bin:$HOME/.local/bin:$PATH'
-file_append_line "/home/$SUDO_USER/.profile" "PS1='\h \w$ '"
-show_done
-
 show "Installing Rust and Cargo..."
-sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo -u "$SUDO_USER" -- sh -s -- -y
-file_append_line "/home/$SUDO_USER/.bashrc" '. $HOME/.cargo/env'
-show_done
+if [ -e $USER_HOME/.cargo/env ]; then
+    show 'Already installed. Skipping!'
+else
+	sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo -u "$SUDO_USER" -- sh -s -- -y
+    (
+     '. $HOME/.cargo/env'   echo
+        echo '. $HOME/.cargo/env'
+    ) >> "$USER_RC"
+	show_done
+fi
 
-declare -r BIN_DEST=/home/$SUDO_USER/bin
+declare -r PATH_SETTINGS_BANNER='# PATH Additions'
+
+show "Setting bashrc and profile paths and prompts..."
+if grep -q -F "$PATH_SETTINGS_BANNER" "$USER_RC"; then
+    show 'Already installed. Skipping!'
+else
+    (
+        echo
+        echo "$PATH_SETTINGS_BANNER"
+        echo 'PATH=$HOME/bin:$PATH'
+        echo 'PATH=$HOME/.local/bin:$PATH'
+        echo
+        echo "PS1='\h \w$ '"
+    ) >> "$USER_RC"
+    show_done
+fi
+
+declare -r BIN_DEST=$USER_HOME/bin
 
 show "Installing user binaries into $BIN_DEST..."
 if ! [ -e "$BIN_DEST" ]; then
@@ -195,11 +217,11 @@ else
     show "$BIN_DEST already exists. Skipping!"
 fi
 
-if ! [ -e /home/$SUDO_USER/.gitconfig ]; then
+if ! [ -e "$USER_HOME/.gitconfig" ]; then
     echo '[user]
     name = Pete Dietl
     email = petedietl@gmail.com
 [core]
-    editor = vim' > /home/$SUDO_USER/.gitconfig
-    chown $SUDO_USER:$SUDO_USER /home/$SUDO_USER/.gitconfig
+    editor = vim' > "$USER_HOME/.gitconfig"
+    chown $SUDO_USER:$SUDO_USER "$USER_HOME/.gitconfig"
 fi
