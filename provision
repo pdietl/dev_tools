@@ -180,10 +180,7 @@ if [ -e $USER_HOME/.cargo/env ]; then
     show 'Already installed. Skipping!'
 else
 	sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo -u "$SUDO_USER" -- sh -s -- -y
-    (
-     '. $HOME/.cargo/env'   echo
-        echo '. $HOME/.cargo/env'
-    ) >> "$USER_RC"
+    echo >> "$USER_RC"
 	show_done
 fi
 
