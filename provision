@@ -197,6 +197,10 @@ else
         echo 'PATH=$HOME/.local/bin:$PATH'
         echo
         echo "PS1='\h \w$ '"
+        echo
+        echo 'if ! sudo service udev status | grep -q '\''is running$'\''; then'
+        echo '    sudo service udev restart'
+        echo 'fi'
     ) >> "$USER_RC"
     show_done
 fi
