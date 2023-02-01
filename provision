@@ -154,7 +154,7 @@ else
         -Dt /home/$SUDO_USER/.vim/pack/plugins/start/cscope/plugin/ \
         cscope_maps.vim
     chown $SUDO_USER:$SUDO_USER -R /home/$SUDO_USER/.vim
-    mkidr -p /home/$SUDO_USER/.vim/spell
+    mkdir -p /home/$SUDO_USER/.vim/spell
     show_done
 fi
 
