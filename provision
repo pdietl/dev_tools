@@ -53,6 +53,7 @@ show_done
 
 show "Installing packages..."
 apt-get install -y \
+    awscli \
 	aptitude \
     asciinema \
     autoconf \

@@ -27,7 +27,8 @@ set smarttab            "[same as sta] <BS> deletes shiftwidth spaces from the s
 syntax enable
 autocmd FileType make setlocal noexpandtab
 set tags=./tags,tags;$HOME
-
+set ignorecase
+set smartcase
 set listchars=eol:$,tab:>-,trail:~,extends:>,precedes:<
 noremap <F5> :set list!<CR>
 

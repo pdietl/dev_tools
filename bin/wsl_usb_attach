@@ -23,5 +23,6 @@ attach_dev() {
     fi
 }
 
-attach_dev "serial" "FT232" "USB Serial Converter"
+attach_dev "serial" "Prolific Technology, Inc. USB-Serial Controller" "Prolific PL2303GC"
 attach_dev "st-link" "STLINK-V3" "ST-Link Debug"
+attach_dev "jlink" "J-Link" "J-Link driver"
