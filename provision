@@ -122,6 +122,35 @@ apt-get install -y \
     zlib1g-dev
 show_done
 
+show "Install Signal..."
+# Taken from https://signal.org/en/download/linux/
+# NOTE: These instructions only work for 64 bit Debian-based
+# Linux distributions such as Ubuntu, Mint etc.
+
+if ! which signal-desktop > /dev/null; then
+    # 1. Install our official public software signing key
+    wget -O- https://updates.signal.org/desktop/apt/keys.asc | gpg --dearmor > /tmp/signal-desktop-keyring.gpg
+    cat /tmp/signal-desktop-keyring.gpg > /usr/share/keyrings/signal-desktop-keyring.gpg
+
+    # 2. Add our repository to your list of repositories
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main' > /etc/apt/sources.list.d/signal-xenial.list
+
+    # 3. Update your package database and install signal
+    apt-get update && apt-get install -y signal-desktop
+else
+    show 'Already installed. Skipping!'
+fi
+show_done
+
+show "Install Discord..."
+if ! which discord > /dev/null; then
+    wget -O /tmp/discord.deb "https://discordapp.com/api/download?platform=linux&format=deb"
+    apt-get install -y /tmp/discord.deb
+else
+    show 'Already installed. Skipping!'
+fi
+show_done
+
 show "Allowing no password when using sudo..."
 sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
 show_done
@@ -168,9 +197,9 @@ else
     show_done
 fi
 
-if which gsettings; then
+if which gsettings > /dev/null; then
     show "Setting GNOME to use 12-hr time..."
-    gsettings set org.gnome.desktop.interface clock-format '12h'
+    sudo -H -u "$SUDO_USER" DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$(id -u "$SUDO_USER")"/bus gsettings set org.gnome.desktop.interface clock-format 12h
     show_done
 fi
 
@@ -189,6 +218,16 @@ else
 	show_done
 fi
 
+show "Generating SSH Key pair..."
+declare -r KEY_TYPE=ed25519
+declare -r KEY_PATH=/home/$SUDO_USER/.ssh/id_$KEY_TYPE
+if [ -e "$KEY_PATH" ]; then
+    show 'Already generated. Skipping!'
+else
+    sudo -H -u "$SUDO_USER" ssh-keygen -t "$KEY_TYPE" -N '' -f "$KEY_PATH"
+fi
+show_done
+
 declare -r PATH_SETTINGS_BANNER='# PATH Additions'
 
 show "Setting bashrc and profile paths and prompts..."
@@ -201,7 +240,7 @@ else
         echo 'PATH=$HOME/bin:$PATH'
         echo 'PATH=$HOME/.local/bin:$PATH'
         echo
-        echo "PS1='\h \w$ '"
+        echo "PS1='\w$ '"
         echo
         echo 'if ! sudo service udev status | grep -q '\''is running$'\''; then'
         echo '    sudo service udev restart'
