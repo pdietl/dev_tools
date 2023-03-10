@@ -69,6 +69,7 @@ apt-get install -y \
     cscope \
     curl \
     ddd \
+    direnv \
     docker.io \
     dos2unix \
     exuberant-ctags \
@@ -245,6 +246,8 @@ else
         echo 'if ! sudo service udev status | grep -q '\''is running$'\''; then'
         echo '    sudo service udev restart'
         echo 'fi'
+        echo
+        echo 'eval "$(direnv hook bash)"'
     ) >> "$USER_RC"
     show_done
 fi
