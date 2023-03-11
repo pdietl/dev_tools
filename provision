@@ -53,13 +53,13 @@ show_done
 
 show "Installing packages..."
 apt-get install -y \
-    awscli \
-	aptitude \
+    aptitude \
     asciinema \
     autoconf \
     autopoint \
     autossh \
     autotools-dev \
+    awscli \
     bison \
     build-essential \
     ccache \
@@ -75,6 +75,8 @@ apt-get install -y \
     exuberant-ctags \
     flex \
     gawk \
+    gcc-multilib \
+    gdb-multiarch \
     gparted \
     graphviz \
     htop \
