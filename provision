@@ -107,6 +107,7 @@ apt-get install -y \
     qemu-kvm \
     qemu-system-x86 \
     remake \
+    riprep \
     rlwrap \
     rpm \
     ruby \
@@ -125,7 +126,7 @@ apt-get install -y \
     zlib1g-dev
 show_done
 
-show "Install Signal..."
+show "Installing Signal..."
 # Taken from https://signal.org/en/download/linux/
 # NOTE: These instructions only work for 64 bit Debian-based
 # Linux distributions such as Ubuntu, Mint etc.
@@ -145,13 +146,17 @@ else
 fi
 show_done
 
-show "Install Discord..."
+show "Installing Discord..."
 if ! which discord > /dev/null; then
     wget -O /tmp/discord.deb "https://discordapp.com/api/download?platform=linux&format=deb"
     apt-get install -y /tmp/discord.deb
 else
     show 'Already installed. Skipping!'
 fi
+show_done
+
+show "Installing Slack..."
+sudo snap install slack
 show_done
 
 show "Allowing no password when using sudo..."
@@ -186,8 +191,8 @@ else
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt /home/$SUDO_USER/.vim/pack/plugins/start/cscope/plugin/ \
         cscope_maps.vim
-    chown $SUDO_USER:$SUDO_USER -R /home/$SUDO_USER/.vim
     mkdir -p /home/$SUDO_USER/.vim/spell
+    chown $SUDO_USER:$SUDO_USER -R /home/$SUDO_USER/.vim
     show_done
 fi
 
