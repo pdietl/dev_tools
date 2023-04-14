@@ -107,7 +107,7 @@ apt-get install -y \
     qemu-kvm \
     qemu-system-x86 \
     remake \
-    riprep \
+    ripgrep \
     rlwrap \
     rpm \
     ruby \
@@ -130,8 +130,9 @@ show "Installing Signal..."
 # Taken from https://signal.org/en/download/linux/
 # NOTE: These instructions only work for 64 bit Debian-based
 # Linux distributions such as Ubuntu, Mint etc.
-
-if ! which signal-desktop > /dev/null; then
+if command -v signal-desktop > /dev/null; then
+    show 'Already installed. Skipping!'
+else
     # 1. Install our official public software signing key
     wget -O- https://updates.signal.org/desktop/apt/keys.asc | gpg --dearmor > /tmp/signal-desktop-keyring.gpg
     cat /tmp/signal-desktop-keyring.gpg > /usr/share/keyrings/signal-desktop-keyring.gpg
@@ -141,22 +142,47 @@ if ! which signal-desktop > /dev/null; then
 
     # 3. Update your package database and install signal
     apt-get update && apt-get install -y signal-desktop
-else
-    show 'Already installed. Skipping!'
 fi
 show_done
 
 show "Installing Discord..."
-if ! which discord > /dev/null; then
-    wget -O /tmp/discord.deb "https://discordapp.com/api/download?platform=linux&format=deb"
-    apt-get install -y /tmp/discord.deb
-else
+if command -v discord > /dev/null; then
     show 'Already installed. Skipping!'
+else
+    wget -O /tmp/discord.deb 'https://discordapp.com/api/download?platform=linux&format=deb'
+    apt-get install -y /tmp/discord.deb
 fi
 show_done
 
 show "Installing Slack..."
-sudo snap install slack
+if command -v slack > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    snap install slack
+fi
+show_done
+
+show "Installing Postman..."
+if command -v postman > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    snap install postman
+fi
+show_done
+
+show "Installing Teleport..."
+if command -v tsh > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    curl https://apt.releases.teleport.dev/gpg -o /usr/share/keyrings/teleport-archive-keyring.asc
+    source /etc/os-release
+    echo "deb [signed-by=/usr/share/keyrings/teleport-archive-keyring.asc] \
+    https://apt.releases.teleport.dev/${ID?} ${VERSION_CODENAME?} stable/v12" \
+    > /etc/apt/sources.list.d/teleport.list
+
+    apt-get update
+    apt-get install -y teleport
+fi
 show_done
 
 show "Allowing no password when using sudo..."
@@ -202,12 +228,6 @@ if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
 else
     install --owner $SUDO_USER --group $SUDO_USER \
         tmux.conf /home/$SUDO_USER/.tmux.conf
-    show_done
-fi
-
-if which gsettings > /dev/null; then
-    show "Setting GNOME to use 12-hr time..."
-    sudo -H -u "$SUDO_USER" DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$(id -u "$SUDO_USER")"/bus gsettings set org.gnome.desktop.interface clock-format 12h
     show_done
 fi
 
@@ -280,3 +300,22 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
     editor = vim' > "$USER_HOME/.gitconfig"
     chown $SUDO_USER:$SUDO_USER "$USER_HOME/.gitconfig"
 fi
+
+show "Set GNOME settings..."
+if command -v gsettings > /dev/null; then
+    show "Setting GNOME to use 12-hr time..."
+    sudo -H -u "$SUDO_USER" DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$(id -u "$SUDO_USER")"/bus gsettings set org.gnome.desktop.interface clock-format 12h
+    show_done
+	show "Setting GNOME desktop favorite apps..."
+	favorite_apps="[
+		'firefox_firefox.desktop',
+		'org.gnome.Nautilus.desktop',
+		'signal-desktop.desktop',
+		'discord.desktop',
+		'slack_slack.desktop'
+	]"
+	sudo -H -u "$SUDO_USER" DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$(id -u "$SUDO_USER")"/bus gsettings set org.gnome.shell favorite-apps "$favorite_apps"
+else
+	show "GNOME shell not present. Skipping!"
+fi
+show_done
