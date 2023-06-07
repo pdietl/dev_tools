@@ -70,7 +70,6 @@ apt-get install -y \
     curl \
     ddd \
     direnv \
-    docker.io \
     dos2unix \
     exuberant-ctags \
     flex \
@@ -190,6 +189,28 @@ sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
 show_done
 
 show "Setting up Docker..."
+if docker run hello-world; then
+    show 'Already installed. Skipping!'
+else
+    for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+        apt-get remove -y "$pkg"
+    done
+
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+
+    echo \
+      "deb [arch="$(dpkg --print-architecture)" \
+      signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+      "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > \
+      /etc/apt/sources.list.d/docker.list
+
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    docker run hello-world
+fi
+
 show "Adding user '$SUDO_USER' to docker group..."
 if groups "$SUDO_USER" | grep -q 'docker'; then
     show "User '$SUDO_USER' is already a member of the docker group. Skipping!"
