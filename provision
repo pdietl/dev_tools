@@ -3,6 +3,14 @@
 set -eu
 set -o pipefail
 
+SCRIPT_SRC=${BASH_SCRIPT_SRC[0]}
+while [ -L "$SCRIPT_SRC" ]; do # resolve $SCRIPT_SRC until the file is no longer a symlink
+  SCRIPT_DIR=$( cd -P "$( dirname "$SCRIPT_SRC" )" >/dev/null 2>&1 && pwd )
+  SCRIPT_SRC=$(readlink "$SCRIPT_SRC")
+  [[ $SCRIPT_SRC != /* ]] && SCRIPT_SRC=$SCRIPT_DIR/$SCRIPT_SRC # if $SCRIPT_SRC was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SCRIPT_DIR=$( cd -P "$( dirname "$SCRIPT_SRC" )" >/dev/null 2>&1 && pwd )
+
 show() {
     echo
     echo "***"
@@ -252,10 +260,10 @@ if [ -e "/home/$SUDO_USER/.vimrc" ]; then
     show 'Already installed. Skipping!'
 else
     install --owner $SUDO_USER --group $SUDO_USER \
-        vimrc /home/$SUDO_USER/.vimrc
+        "$SCRIPT_DIR"/vimrc /home/$SUDO_USER/.vimrc
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt /home/$SUDO_USER/.vim/pack/plugins/start/cscope/plugin/ \
-        cscope_maps.vim
+        "$SCRIPT_DIR"/cscope_maps.vim
     mkdir -p /home/$SUDO_USER/.vim/spell
     chown $SUDO_USER:$SUDO_USER -R /home/$SUDO_USER/.vim
     show_done
@@ -266,7 +274,7 @@ if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
     show 'Already installed. Skipping!'
 else
     install --owner $SUDO_USER --group $SUDO_USER \
-        tmux.conf /home/$SUDO_USER/.tmux.conf
+        "$SCRIPT_DIR"/tmux.conf /home/$SUDO_USER/.tmux.conf
     show_done
 fi
 
@@ -305,19 +313,16 @@ show "Setting bashrc and profile paths and prompts..."
 if grep -q -F "$PATH_SETTINGS_BANNER" "$USER_RC"; then
     show 'Already installed. Skipping!'
 else
+    cat "$SCRIPT_DIR"/dedup_paths.sh >> "$USER_RC"
     (
         echo
         echo "$PATH_SETTINGS_BANNER"
-        echo 'PATH=$HOME/bin:$PATH'
-        echo 'PATH=$HOME/.local/bin:$PATH'
+		echo 'prepend_path "$HOME"/bin'
+		echo 'prepend_path "$HOME"/.local'
         echo
+        echo 'dedup_paths'
         echo "PS1='\w$ '"
         echo
-        echo 'if ! sudo service udev status | grep -q '\''is running$'\''; then'
-        echo '    sudo service udev restart'
-        echo 'fi'
-        echo
-        echo 'eval "$(direnv hook bash)"'
     ) >> "$USER_RC"
     show_done
 fi
@@ -328,7 +333,7 @@ show "Installing user binaries into $BIN_DEST..."
 if ! [ -e "$BIN_DEST" ]; then
     install --owner $SUDO_USER --group $SUDO_USER \
         -Dt "$BIN_DEST" \
-        bin/*
+        "$SCRIPT_DIR"/bin/*
     chown $SUDO_USER:$SUDO_USER -R "$BIN_DEST"
     show_done
 else
@@ -381,7 +386,11 @@ fi
 show_done
 
 show "Installing udev rules..."
-cp -v udev_rules/* /etc/udev/rules.d/
+cp -v "$SCRIPT_DIR"/udev_rules/* /etc/udev/rules.d/
+show_done
+
+show "Installing gdbinit..."
+cp -v "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
 show_done
 
 show "Cleaning up via autoremove..."

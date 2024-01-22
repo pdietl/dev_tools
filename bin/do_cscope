@@ -2,6 +2,12 @@
 
 set -eu
 
-find . -name '*.[ch]' -exec realpath {} \; > cscope.files
+if [ $# -gt 1 ]; then
+    starting_points=( "$@" )
+else
+    starting_points=( . )
+fi
+
+find "${starting_points[@]}" \( -name '*.[ch]' -o -name '*.cc' \) -exec realpath {} \; > cscope.files
 
 cscope -q -b
