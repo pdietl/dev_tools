@@ -29,6 +29,19 @@ file_append_line() {
     fi
 }
 
+add_user_to_group() {
+    local user=$1
+    local group=$2
+
+    show "Adding user '$user' to the '$group' group..."
+    if groups "$user" | grep -q "$group"; then
+        show "User '$user' is already a member of the '$group' group. Skipping!"
+    else
+        usermod -a -G "$group" "$user"
+        show_done
+    fi
+}
+
 if [[ $EUID -ne 0 ]]; then
    show "This script must be run as root"
    exit 1
@@ -222,13 +235,7 @@ else
     docker run hello-world
 fi
 
-show "Adding user '$SUDO_USER' to docker group..."
-if groups "$SUDO_USER" | grep -q 'docker'; then
-    show "User '$SUDO_USER' is already a member of the docker group. Skipping!"
-else
-    usermod -a -G docker "$SUDO_USER"
-    show_done
-fi
+add_user_to_group "$SUDO_USER" docker
 
 show "Sanity checking docker AS '$SUDO_USER' via docker.io..."
 
@@ -336,6 +343,9 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
     editor = vim' > "$USER_HOME/.gitconfig"
     chown $SUDO_USER:$SUDO_USER "$USER_HOME/.gitconfig"
 fi
+
+add_user_to_group "$SUDO_USER" dialout
+add_user_to_group "$SUDO_USER" plugdev
 
 gsettings_set() {
     local schema=$1
