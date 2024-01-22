@@ -380,6 +380,10 @@ else
 fi
 show_done
 
+show "Installing udev rules..."
+cp -v udev_rules/* /etc/udev/rules.d/
+show_done
+
 show "Cleaning up via autoremove..."
 apt-get autoremove -y
 show_done
