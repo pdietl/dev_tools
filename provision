@@ -307,6 +307,10 @@ else
 fi
 show_done
 
+show "Updating this repo's origin remote from http to ssh..."
+( cd "$SCRIPT_DIR" && git remote set-url origin git@github.com:pdietl/dev_tools.git )
+show_done
+
 declare -r PATH_SETTINGS_BANNER='# PATH Additions'
 
 show "Setting bashrc and profile paths and prompts..."
@@ -387,6 +391,7 @@ show_done
 
 show "Installing udev rules..."
 cp -v "$SCRIPT_DIR"/udev_rules/* /etc/udev/rules.d/
+sudo udevadm control --reload
 show_done
 
 show "Installing gdbinit..."
