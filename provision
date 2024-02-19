@@ -3,18 +3,25 @@
 set -eu
 set -o pipefail
 
-SCRIPT_SRC=${BASH_SCRIPT_SRC[0]}
-while [ -L "$SCRIPT_SRC" ]; do # resolve $SCRIPT_SRC until the file is no longer a symlink
-  SCRIPT_DIR=$( cd -P "$( dirname "$SCRIPT_SRC" )" >/dev/null 2>&1 && pwd )
-  SCRIPT_SRC=$(readlink "$SCRIPT_SRC")
-  [[ $SCRIPT_SRC != /* ]] && SCRIPT_SRC=$SCRIPT_DIR/$SCRIPT_SRC # if $SCRIPT_SRC was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+SCRIPT_SRC=${BASH_SOURCE[0]}
+# Resolve $SCRIPT_SRC until the file is no longer a symlink.
+while [ -L "$SCRIPT_SRC" ]; do
+    SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_SRC")" > /dev/null 2>&1 && pwd)
+    SCRIPT_SRC=$(readlink "$SCRIPT_SRC")
+    # If $SCRIPT_SRC was a relative symlink, we need to resolve it relative to the path
+    # where the symlink file was located.
+    [[ $SCRIPT_SRC != /* ]] && SCRIPT_SRC=$SCRIPT_DIR/$SCRIPT_SRC
 done
-SCRIPT_DIR=$( cd -P "$( dirname "$SCRIPT_SRC" )" >/dev/null 2>&1 && pwd )
+SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_SRC")" > /dev/null 2>&1 && pwd)
+
+declare -r USER_HOME=/home/$SUDO_USER
+declare -r USER_RC=$USER_HOME/.bashrc
+declare -a path_additions=('"$HOME"/bin' '"$HOME"/.local/bin')
 
 show() {
     echo
     echo "***"
-    echo "*** $@"
+    echo "*** $*"
     echo "***"
     echo
 }
@@ -29,7 +36,7 @@ file_append_line() {
 
     echo -n "Checking file '$file' for line '$line'... "
 
-    if ! $(grep -q -F "$line" "$file"); then
+    if ! grep -q -F "$line" "$file"; then
         echo "no, appending"
         echo "$line" >> "$file"
     else
@@ -51,8 +58,8 @@ add_user_to_group() {
 }
 
 if [[ $EUID -ne 0 ]]; then
-   show "This script must be run as root"
-   exit 1
+    show "This script must be run as root"
+    exit 1
 fi
 
 if [ -z "${SUDO_USER:-}" ]; then
@@ -64,8 +71,6 @@ if ! grep -q 'ubuntu' /etc/os-release; then
     echo "Error: I don't think you're running Ubuntu and I only know how to initialize that system." >&2
     exit 1
 fi
-
-declare -r USER_HOME=/home/$SUDO_USER
 
 show "Updating packages..."
 apt-get update
@@ -191,6 +196,16 @@ else
 fi
 show_done
 
+show "Installing Neovim..."
+if command -v nvim > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    wget -O /tmp/nvim.tgz https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz
+    sudo tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
+    rm /tmp/nvim.tgz
+fi
+show_done
+
 show "Installing Google Chrome..."
 if command -v google-chrome > /dev/null; then
     show 'Already installed. Skipping!'
@@ -201,23 +216,78 @@ else
 fi
 show_done
 
+show "Installing JetBrains GoLand IDE..."
+sudo snap install goland --classic
+show_done
+
+show "Installing JetBrains PyCharm IDE..."
+sudo snap install pycharm-community --classic
+show_done
+
 show "Installing 1Password GUI..."
 if command -v 1password > /dev/null; then
     show 'Already installed. Skipping!'
 else
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc | sudo gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' | sudo tee /etc/apt/sources.list.d/1password.list
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc |
+        sudo gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' |
+        sudo tee /etc/apt/sources.list.d/1password.list
     sudo mkdir -p /etc/debsig/policies/AC2D62742012EA22/
-    curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol | sudo tee /etc/debsig/policies/AC2D62742012EA22/1password.pol
+    curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol |
+        sudo tee /etc/debsig/policies/AC2D62742012EA22/1password.pol
     sudo mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc | sudo gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc |
+        sudo gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
     apt-get update
     apt-get install -y 1password
 fi
 show_done
 
-show "Allowing no password when using sudo..."
-sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
+show "Installing Rust and Cargo..."
+if [ -e "$USER_HOME"/.cargo/env ]; then
+    show 'Already installed. Skipping!'
+else
+    sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+        sudo -u "$SUDO_USER" -- sh -s -- -y --no-modify-path
+    path_additions+=('"$HOME"/.cargo/bin')
+    show_done
+fi
+
+show "Installing Go..."
+if [ -e /usr/local/go ]; then
+    show 'Already installed. Skipping!'
+else
+    #Download Latest Go
+    echo "Finding latest version of Go for AMD64... "
+    latest=$(wget -nv -O- https://go.dev/dl/)
+    latest=$(grep -oP -m1 'go(\d+\.){3}linux-amd64\.tar\.gz' - <<< "$latest")
+    if [ -z "$latest" ]; then
+        echo "Error determining latest Go version!"
+        exit 1
+    fi
+    url=https://go.dev/dl/"$latest"
+    echo "Downloading latest Go: $latest"
+    wget --quiet --continue --show-progress "$url"
+    unset url
+
+    # Remove Old Go
+    sudo rm -rf /usr/local/go
+
+    # Install new Go
+    sudo tar -C /usr/local -xzf "$latest"
+    echo "Create the skeleton for your local users go directory"
+    mkdir -p "$SUDO_USER"/go/{bin,pkg,src}
+    echo "Setting up GOPATH"
+    echo $'\n''export GOPATH=$HOME/go'$'\n' >> "$USER_RC"
+    echo "Setting PATH to include golang binaries"
+    path_additions+=('/usr/local/go/bin' '"$GOPATH"/bin')
+
+    # Remove Download
+    rm "$latest"
+
+    # Print Go Version
+    /usr/local/go/bin/go version
+fi
 show_done
 
 show "Setting up Docker..."
@@ -233,10 +303,10 @@ else
     chmod a+r /etc/apt/keyrings/docker.gpg
 
     echo \
-      "deb [arch="$(dpkg --print-architecture)" \
-      signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-      "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > \
-      /etc/apt/sources.list.d/docker.list
+        "deb [arch=$(dpkg --print-architecture)" \
+        'signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu' \
+        "$(. /etc/os-release && echo "$VERSION_CODENAME") stable" > \
+        /etc/apt/sources.list.d/docker.list
 
     apt-get update
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
@@ -255,17 +325,21 @@ if ! su -c 'docker run hello-world' "$SUDO_USER"; then
 fi
 show_done
 
+show "Allowing no password when using sudo..."
+sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
+show_done
+
 show "Installing default vimrc..."
 if [ -e "/home/$SUDO_USER/.vimrc" ]; then
     show 'Already installed. Skipping!'
 else
-    install --owner $SUDO_USER --group $SUDO_USER \
-        "$SCRIPT_DIR"/vimrc /home/$SUDO_USER/.vimrc
-    install --owner $SUDO_USER --group $SUDO_USER \
-        -Dt /home/$SUDO_USER/.vim/pack/plugins/start/cscope/plugin/ \
+    install --owner "$SUDO_USER" --group "$SUDO_USER" \
+        "$SCRIPT_DIR"/vimrc /home/"$SUDO_USER"/.vimrc
+    install --owner "$SUDO_USER" --group "$SUDO_USER" \
+        -Dt /home/"$SUDO_USER"/.vim/pack/plugins/start/cscope/plugin/ \
         "$SCRIPT_DIR"/cscope_maps.vim
-    mkdir -p /home/$SUDO_USER/.vim/spell
-    chown $SUDO_USER:$SUDO_USER -R /home/$SUDO_USER/.vim
+    mkdir -p /home/"$SUDO_USER"/.vim/spell
+    chown "$SUDO_USER:$SUDO_USER" -R /home/"$SUDO_USER"/.vim
     show_done
 fi
 
@@ -273,29 +347,17 @@ show "Installing default tmux conf..."
 if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
     show 'Already installed. Skipping!'
 else
-    install --owner $SUDO_USER --group $SUDO_USER \
-        "$SCRIPT_DIR"/tmux.conf /home/$SUDO_USER/.tmux.conf
+    install --owner "$SUDO_USER" --group "$SUDO_USER" \
+        "$SCRIPT_DIR"/tmux.conf /home/"$SUDO_USER"/.tmux.conf
     show_done
 fi
 
-declare -r USER_RC=$USER_HOME/.bashrc
-
 show "Removing useless home directories..."
-rm -rf /home/$SUDO_USER/{Public,Templates,Videos,Pictures,Music}
+rm -rf /home/"$SUDO_USER"/{Public,Templates,Music}
 show_done
 
 show "Adding useful home directories..."
-mkdir -p /home/$SUDO_USER/{Applications,Repos}
-show_done
-
-show "Installing Rust and Cargo..."
-if [ -e $USER_HOME/.cargo/env ]; then
-    show 'Already installed. Skipping!'
-else
-	sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo -u "$SUDO_USER" -- sh -s -- -y
-    echo >> "$USER_RC"
-	show_done
-fi
+mkdir -p /home/"$SUDO_USER"/{Applications,Repos,Learn}
 
 show "Generating SSH Key pair..."
 declare -r KEY_TYPE=ed25519
@@ -308,37 +370,17 @@ fi
 show_done
 
 show "Updating this repo's origin remote from http to ssh..."
-( cd "$SCRIPT_DIR" && git remote set-url origin git@github.com:pdietl/dev_tools.git )
+(cd "$SCRIPT_DIR" && git remote set-url origin git@github.com:pdietl/dev_tools.git)
 show_done
-
-declare -r PATH_SETTINGS_BANNER='# PATH Additions'
-
-show "Setting bashrc and profile paths and prompts..."
-if grep -q -F "$PATH_SETTINGS_BANNER" "$USER_RC"; then
-    show 'Already installed. Skipping!'
-else
-    cat "$SCRIPT_DIR"/dedup_paths.sh >> "$USER_RC"
-    (
-        echo
-        echo "$PATH_SETTINGS_BANNER"
-		echo 'prepend_path "$HOME"/bin'
-		echo 'prepend_path "$HOME"/.local'
-        echo
-        echo 'dedup_paths'
-        echo "PS1='\w$ '"
-        echo
-    ) >> "$USER_RC"
-    show_done
-fi
 
 declare -r BIN_DEST=$USER_HOME/bin
 
 show "Installing user binaries into $BIN_DEST..."
 if ! [ -e "$BIN_DEST" ]; then
-    install --owner $SUDO_USER --group $SUDO_USER \
+    install --owner "$SUDO_USER" --group "$SUDO_USER" \
         -Dt "$BIN_DEST" \
         "$SCRIPT_DIR"/bin/*
-    chown $SUDO_USER:$SUDO_USER -R "$BIN_DEST"
+    chown "$SUDO_USER:$SUDO_USER" -R "$BIN_DEST"
     show_done
 else
     show "$BIN_DEST already exists. Skipping!"
@@ -350,7 +392,7 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
     email = petedietl@gmail.com
 [core]
     editor = vim' > "$USER_HOME/.gitconfig"
-    chown $SUDO_USER:$SUDO_USER "$USER_HOME/.gitconfig"
+    chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
 fi
 
 add_user_to_group "$SUDO_USER" dialout
@@ -372,20 +414,20 @@ if command -v gsettings > /dev/null; then
     show "Setting GNOME to use 12-hr time..."
     gsettings_set org.gnome.desktop.interface clock-format 12h
     show_done
-	show "Setting GNOME desktop favorite apps..."
-	favorite_apps="[
-		'google-chrome.desktop',
-		'org.gnome.Nautilus.desktop',
-		'signal-desktop.desktop',
-		'discord.desktop',
-		'slack_slack.desktop'
-	]"
+    show "Setting GNOME desktop favorite apps..."
+    favorite_apps="[
+        'google-chrome.desktop',
+        'org.gnome.Nautilus.desktop',
+        'signal-desktop.desktop',
+        'discord.desktop',
+        'slack_slack.desktop'
+    ]"
     gsettings_set org.gnome.shell favorite-apps "$favorite_apps"
     show_done
     show "Setting GNOME tweak to interpret two finger click as right click..."
     gsettings_set org.gnome.desktop.peripherals.touchpad click-method fingers
 else
-	show "GNOME shell not present. Skipping!"
+    show "GNOME shell not present. Skipping!"
 fi
 show_done
 
@@ -401,3 +443,25 @@ show_done
 show "Cleaning up via autoremove..."
 apt-get autoremove -y
 show_done
+
+show "Setting bashrc and profile paths and prompts..."
+declare -r PATH_SETTINGS_BANNER='# PATH Additions'
+if grep -q -F "$PATH_SETTINGS_BANNER" "$USER_RC"; then
+    show 'Already installed. Skipping!'
+else
+    cat "$SCRIPT_DIR"/dedup_paths.sh >> "$USER_RC"
+    (
+        echo
+        echo "$PATH_SETTINGS_BANNER"
+        for addition in "${path_additions[@]}"; do
+            echo "prepend_path $addition"
+        done
+
+        echo
+        echo 'dedup_paths'
+        echo
+        echo "PS1='\w$ '"
+        echo
+    ) >> "$USER_RC"
+    show_done
+fi
