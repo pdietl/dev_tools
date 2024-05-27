@@ -72,6 +72,20 @@ if ! grep -q 'ubuntu' /etc/os-release; then
     exit 1
 fi
 
+show "Adding Hashicorp key and Debian repository..."
+key_file=/etc/apt/trusted.gpg.d/hashicorp.asc
+url=https://apt.releases.hashicorp.com
+
+if [ -e "$key_file" ] && apt-add-repository -L | grep -q "$url"; then
+    show 'Already installed. Skipping!'
+else
+    curl -fsSL "$url"/gpg > "$key_file"
+    apt-add-repository -y "deb [arch=amd64] $url $(lsb_release -cs) main"
+fi
+show_done
+
+systemctl daemon-reload
+
 show "Updating packages..."
 apt-get update
 apt-get upgrade -y
@@ -86,7 +100,6 @@ apt-get install -y \
     autopoint \
     autossh \
     autotools-dev \
-    awscli \
     bison \
     build-essential \
     ccache \
@@ -106,6 +119,7 @@ apt-get install -y \
     gnome-tweaks \
     gparted \
     graphviz \
+    groff \
     htop \
     hwinfo \
     indent \
@@ -148,6 +162,7 @@ apt-get install -y \
     valgrind \
     vim \
     virtualenv \
+    zip \
     zlib1g-dev
 show_done
 
@@ -188,6 +203,20 @@ else
 fi
 show_done
 
+show "Installing awscli..."
+if command -v aws > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    tmp=$(mktemp -d)
+    pushd "$tmp"
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    ./aws/install
+    popd
+    rm -rf "$tmp"
+fi
+show_done
+
 show "Installing Postman..."
 if command -v postman > /dev/null; then
     show 'Already installed. Skipping!'
@@ -201,7 +230,7 @@ if command -v nvim > /dev/null; then
     show 'Already installed. Skipping!'
 else
     wget -O /tmp/nvim.tgz https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz
-    sudo tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
+    tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
     rm /tmp/nvim.tgz
 fi
 show_done
@@ -217,11 +246,11 @@ fi
 show_done
 
 show "Installing JetBrains GoLand IDE..."
-sudo snap install goland --classic
+snap install goland --classic
 show_done
 
 show "Installing JetBrains PyCharm IDE..."
-sudo snap install pycharm-community --classic
+snap install pycharm-community --classic
 show_done
 
 show "Installing 1Password GUI..."
@@ -229,15 +258,14 @@ if command -v 1password > /dev/null; then
     show 'Already installed. Skipping!'
 else
     curl -sS https://downloads.1password.com/linux/keys/1password.asc |
-        sudo gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' |
-        sudo tee /etc/apt/sources.list.d/1password.list
-    sudo mkdir -p /etc/debsig/policies/AC2D62742012EA22/
-    curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol |
-        sudo tee /etc/debsig/policies/AC2D62742012EA22/1password.pol
-    sudo mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc |
-        sudo gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
+        gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' > /etc/apt/sources.list.d/1password.list
+    mkdir -p /etc/debsig/policies/AC2D62742012EA22/
+    curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol > \
+        /etc/debsig/policies/AC2D62742012EA22/1password.pol
+    mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc > \
+        gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
     apt-get update
     apt-get install -y 1password
 fi
@@ -271,10 +299,10 @@ else
     unset url
 
     # Remove Old Go
-    sudo rm -rf /usr/local/go
+    rm -rf /usr/local/go
 
     # Install new Go
-    sudo tar -C /usr/local -xzf "$latest"
+    tar -C /usr/local -xzf "$latest"
     echo "Create the skeleton for your local users go directory"
     mkdir -p "$SUDO_USER"/go/{bin,pkg,src}
     echo "Setting up GOPATH"
@@ -357,7 +385,10 @@ rm -rf /home/"$SUDO_USER"/{Public,Templates,Music}
 show_done
 
 show "Adding useful home directories..."
-mkdir -p /home/"$SUDO_USER"/{Applications,Repos,Learn}
+dir_list=$(echo -n /home/"$SUDO_USER"/{Applications,Repos,Learn})
+mkdir -p $dir_list
+chown "$SUDO_USER:$SUDO_USER" -R $dir_list
+show_done
 
 show "Generating SSH Key pair..."
 declare -r KEY_TYPE=ed25519
@@ -433,7 +464,7 @@ show_done
 
 show "Installing udev rules..."
 cp -v "$SCRIPT_DIR"/udev_rules/* /etc/udev/rules.d/
-sudo udevadm control --reload
+udevadm control --reload
 show_done
 
 show "Installing gdbinit..."
