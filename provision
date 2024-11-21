@@ -167,7 +167,12 @@ show "Installing Nix..."
 if [ -e /etc/.nix-installed ]; then
     show 'Already installed. Skipping!'
 else
-    sh <(curl -L https://nixos.org/nix/install) --daemon
+    sh <(curl -L https://nixos.org/nix/install) --daemon --yes
+    echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
+    install --owner "$SUDO_USER" --group "$SUDO_USER" \
+        -Dt "$USER_HOME/.config/nix" \
+        "$SCRIPT_DIR"/nix.conf
+    chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME/.config/nix"
     touch /etc/.nix-installed
 fi
 show_done
@@ -489,10 +494,12 @@ else
             echo "prepend_path $addition"
         done
 
+        echo
         echo 'dedup_paths'
         echo
         echo "PS1='\w$ '"
         echo
+        echo 'eval "$(direnv hook bash)"'
         echo 'eval "$(starship init bash)"'
     ) >> "$USER_RC"
     chown "$SUDO_USER:$SUDO_USER" -R /home/"$SUDO_USER"/.bashrc
