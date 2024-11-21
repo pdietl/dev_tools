@@ -18,6 +18,10 @@ declare -r USER_HOME=/home/$SUDO_USER
 declare -r USER_RC=$USER_HOME/.bashrc
 declare -a path_additions=('"$HOME"/bin' '"$HOME"/.local/bin')
 
+in_wsl() {
+    [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]
+}
+
 show() {
     echo
     echo "***"
@@ -72,20 +76,6 @@ if ! grep -q 'ubuntu' /etc/os-release; then
     exit 1
 fi
 
-show "Adding Hashicorp key and Debian repository..."
-key_file=/etc/apt/trusted.gpg.d/hashicorp.asc
-url=https://apt.releases.hashicorp.com
-
-if [ -e "$key_file" ] && apt-add-repository -L | grep -q "$url"; then
-    show 'Already installed. Skipping!'
-else
-    curl -fsSL "$url"/gpg > "$key_file"
-    apt-add-repository -y "deb [arch=amd64] $url $(lsb_release -cs) main"
-fi
-show_done
-
-systemctl daemon-reload
-
 show "Updating packages..."
 apt-get update
 apt-get upgrade -y
@@ -136,7 +126,6 @@ apt-get install -y \
     openssh-server \
     openssh-server \
     p7zip-full \
-    packer \
     picocom \
     pre-commit \
     protobuf-compiler \
@@ -166,11 +155,30 @@ apt-get install -y \
     zlib1g-dev
 show_done
 
+show "Installing Starship..."
+if command -v starship > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    sh <(curl -sS https://starship.rs/install.sh) -y
+fi
+show_done
+
+show "Installing Nix..."
+if [ -e /etc/.nix-installed ]; then
+    show 'Already installed. Skipping!'
+else
+    sh <(curl -L https://nixos.org/nix/install) --daemon
+    touch /etc/.nix-installed
+fi
+show_done
+
 show "Installing Signal..."
 # Taken from https://signal.org/en/download/linux/
 # NOTE: These instructions only work for 64 bit Debian-based
 # Linux distributions such as Ubuntu, Mint etc.
-if command -v signal-desktop > /dev/null; then
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif command -v signal-desktop > /dev/null; then
     show 'Already installed. Skipping!'
 else
     # 1. Install our official public software signing key
@@ -186,7 +194,9 @@ fi
 show_done
 
 show "Installing Discord..."
-if command -v discord > /dev/null; then
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif command -v discord > /dev/null; then
     show 'Already installed. Skipping!'
 else
     wget -O /tmp/discord.deb 'https://discordapp.com/api/download?platform=linux&format=deb'
@@ -196,7 +206,9 @@ fi
 show_done
 
 show "Installing Slack..."
-if command -v slack > /dev/null; then
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif command -v slack > /dev/null; then
     show 'Already installed. Skipping!'
 else
     snap install slack
@@ -217,14 +229,6 @@ else
 fi
 show_done
 
-show "Installing Postman..."
-if command -v postman > /dev/null; then
-    show 'Already installed. Skipping!'
-else
-    snap install postman
-fi
-show_done
-
 show "Installing Neovim..."
 if command -v nvim > /dev/null; then
     show 'Already installed. Skipping!'
@@ -236,7 +240,9 @@ fi
 show_done
 
 show "Installing Google Chrome..."
-if command -v google-chrome > /dev/null; then
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif command -v google-chrome > /dev/null; then
     show 'Already installed. Skipping!'
 else
     wget -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
@@ -245,16 +251,10 @@ else
 fi
 show_done
 
-show "Installing JetBrains GoLand IDE..."
-snap install goland --classic
-show_done
-
-show "Installing JetBrains PyCharm IDE..."
-snap install pycharm-community --classic
-show_done
-
 show "Installing 1Password GUI..."
-if command -v 1password > /dev/null; then
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif command -v 1password > /dev/null; then
     show 'Already installed. Skipping!'
 else
     curl -sS https://downloads.1password.com/linux/keys/1password.asc |
@@ -264,8 +264,8 @@ else
     curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol > \
         /etc/debsig/policies/AC2D62742012EA22/1password.pol
     mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc > \
-        gpg --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
+        --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg > gpg
     apt-get update
     apt-get install -y 1password
 fi
@@ -441,7 +441,9 @@ gsettings_set() {
 }
 
 show "Set GNOME settings..."
-if command -v gsettings > /dev/null; then
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif command -v gsettings > /dev/null; then
     show "Setting GNOME to use 12-hr time..."
     gsettings_set org.gnome.desktop.interface clock-format 12h
     show_done
@@ -477,22 +479,22 @@ show_done
 
 show "Setting bashrc and profile paths and prompts..."
 declare -r PATH_SETTINGS_BANNER='# PATH Additions'
-if grep -q -F "$PATH_SETTINGS_BANNER" "$USER_RC"; then
+if [ -e "$USER_RC" ] && grep -q -F "$PATH_SETTINGS_BANNER" "$USER_RC"; then
     show 'Already installed. Skipping!'
 else
     cat "$SCRIPT_DIR"/dedup_paths.sh >> "$USER_RC"
     (
-        echo
         echo "$PATH_SETTINGS_BANNER"
         for addition in "${path_additions[@]}"; do
             echo "prepend_path $addition"
         done
 
-        echo
         echo 'dedup_paths'
         echo
         echo "PS1='\w$ '"
         echo
+        echo 'eval "$(starship init bash)"'
     ) >> "$USER_RC"
+    chown "$SUDO_USER:$SUDO_USER" -R /home/"$SUDO_USER"/.bashrc
     show_done
 fi
