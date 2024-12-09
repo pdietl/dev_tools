@@ -142,6 +142,7 @@ apt-get install -y \
     ruby-dev \
     shellcheck \
     sshfs \
+    strace \
     texinfo \
     tmate \
     tmux \
