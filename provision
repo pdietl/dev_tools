@@ -118,6 +118,8 @@ apt-get install -y \
     libvirt-clients \
     libvirt-dev \
     linux-tools-generic \
+    lua5.1 \
+    luarocks \
     nasm \
     net-tools \
     ninja-build \
@@ -428,8 +430,13 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
     name = Pete Dietl
     email = petedietl@gmail.com
 [core]
-    editor = vim' > "$USER_HOME/.gitconfig"
+    editor = vim
+    excludesfile = ~/.gitignore_global
+[init]
+    defaultBranch = main' > "$USER_HOME/.gitconfig"
     chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
+    install --owner "$SUDO_USER" --group "$SUDO_USER" \
+        "$SCRIPT_DIR"/gitignore_global /home/"$SUDO_USER"/.gitignore_global
 fi
 
 add_user_to_group "$SUDO_USER" dialout
@@ -504,5 +511,7 @@ else
         echo 'eval "$(starship init bash)"'
     ) >> "$USER_RC"
     chown "$SUDO_USER:$SUDO_USER" -R /home/"$SUDO_USER"/.bashrc
+    install --owner "$SUDO_USER" --group "$SUDO_USER" \
+        "$SCRIPT_DIR"/starship.toml /home/"$SUDO_USER"/.config/starship.toml
     show_done
 fi
