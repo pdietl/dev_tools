@@ -372,7 +372,8 @@ show "Installing default vimrc..."
 if [ -e "/home/$SUDO_USER/.vimrc" ]; then
     show 'Already installed. Skipping!'
 else
-    installUser "$USER_HOME" "$SCRIPT_DIR"/vimrc
+    cp -v "$SCRIPT_DIR"/vimrc "$USER_HOME/.vimrc
+    chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.vimrc
     installUser "$USER_HOME"/.vim/pack/plugins/start/cscope/plugin/ "$SCRIPT_DIR"/cscope_maps.vim
     installUser "$USER_HOME"/.vim/spell
     show_done
@@ -382,7 +383,8 @@ show "Installing default tmux conf..."
 if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
     show 'Already installed. Skipping!'
 else
-    installUser "$USER_HOME" "$SCRIPT_DIR"/tmux.conf
+    cp -v $SCRIPT_DIR"/tmux.conf "$USER_HOME"/.tmux.conf
+    chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux.conf
     show_done
 fi
 
@@ -430,7 +432,7 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
 [init]
     defaultBranch = main' > "$USER_HOME/.gitconfig"
     chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
-    cp -v "$SCRIPT_DIR"/gitignore_global "$USER_HOME"/.gitignore_global 
+    cp -v "$SCRIPT_DIR"/gitignore_global "$USER_HOME"/.gitignore_global
     chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.gitignore_global
 fi
 
@@ -478,7 +480,8 @@ udevadm control --reload
 show_done
 
 show "Installing gdbinit..."
-installUser "$USER_HOME" "$SCRIPT_DIR"/gdbinit
+cp -v "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
+chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.gdbinit
 show_done
 
 show "Installing Nix..."
