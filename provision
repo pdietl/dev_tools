@@ -18,6 +18,19 @@ declare -r USER_HOME=/home/$SUDO_USER
 declare -r USER_RC=$USER_HOME/.bashrc
 declare -a path_additions=('"$HOME"/bin' '"$HOME"/.local/bin')
 
+installUser() {
+    local dest_dir
+    local file_to_copy
+    dest_dir=$1
+    file_to_copy=${2:-}
+
+    install --owner "$SUDO_USER" --group "$SUDO_USER" -d "$dest_dir"
+
+    if [ -n "$file_to_copy" ]; then
+        install --owner "$SUDO_USER" --group "$SUDO_USER" -t "$dest_dir" "$@"
+    fi
+}
+
 in_wsl() {
     [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]
 }
@@ -172,10 +185,7 @@ if [ -e /etc/.nix-installed ]; then
 else
     sh <(curl -L https://nixos.org/nix/install) --daemon --yes
     echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
-    install --owner "$SUDO_USER" --group "$SUDO_USER" \
-        -Dt "$USER_HOME/.config/nix" \
-        "$SCRIPT_DIR"/nix.conf
-    chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME/.config/nix"
+    installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/nix.conf"
     touch /etc/.nix-installed
 fi
 show_done
@@ -244,6 +254,7 @@ else
     wget -O /tmp/nvim.tgz https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz
     tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
     rm /tmp/nvim.tgz
+    installUser "$USER_HOME"/.config/nvim "$SCRIPT_DIR"/nvim/*
 fi
 show_done
 
@@ -369,13 +380,9 @@ show "Installing default vimrc..."
 if [ -e "/home/$SUDO_USER/.vimrc" ]; then
     show 'Already installed. Skipping!'
 else
-    install --owner "$SUDO_USER" --group "$SUDO_USER" \
-        "$SCRIPT_DIR"/vimrc /home/"$SUDO_USER"/.vimrc
-    install --owner "$SUDO_USER" --group "$SUDO_USER" \
-        -Dt /home/"$SUDO_USER"/.vim/pack/plugins/start/cscope/plugin/ \
-        "$SCRIPT_DIR"/cscope_maps.vim
-    mkdir -p /home/"$SUDO_USER"/.vim/spell
-    chown "$SUDO_USER:$SUDO_USER" -R /home/"$SUDO_USER"/.vim
+    installUser "$USER_HOME" "$SCRIPT_DIR"/vimrc
+    installUser "$USER_HOME"/.vim/pack/plugins/start/cscope/plugin/ "$SCRIPT_DIR"/cscope_maps.vim
+    installUser "$USER_HOME"/.vim/spell
     show_done
 fi
 
@@ -383,17 +390,16 @@ show "Installing default tmux conf..."
 if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
     show 'Already installed. Skipping!'
 else
-    install --owner "$SUDO_USER" --group "$SUDO_USER" \
-        "$SCRIPT_DIR"/tmux.conf /home/"$SUDO_USER"/.tmux.conf
+    installUser "$USER_HOME" "$SCRIPT_DIR"/tmux.conf
     show_done
 fi
 
 show "Removing useless home directories..."
-rm -rf /home/"$SUDO_USER"/{Public,Templates,Music}
+rm -rf "$USER_HOME"/{Public,Templates,Music}
 show_done
 
 show "Adding useful home directories..."
-dir_list=$(echo -n /home/"$SUDO_USER"/{Applications,Repos,Learn})
+dir_list=$(echo -n "$USER_HOME"/{Applications,Downloads,Learn,Repos})
 mkdir -p $dir_list
 chown "$SUDO_USER:$SUDO_USER" -R $dir_list
 show_done
@@ -416,10 +422,7 @@ declare -r BIN_DEST=$USER_HOME/bin
 
 show "Installing user binaries into $BIN_DEST..."
 if ! [ -e "$BIN_DEST" ]; then
-    install --owner "$SUDO_USER" --group "$SUDO_USER" \
-        -Dt "$BIN_DEST" \
-        "$SCRIPT_DIR"/bin/*
-    chown "$SUDO_USER:$SUDO_USER" -R "$BIN_DEST"
+    installUser "$BIN_DEST" "$SCRIPT_DIR"/bin/*
     show_done
 else
     show "$BIN_DEST already exists. Skipping!"
@@ -435,8 +438,7 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
 [init]
     defaultBranch = main' > "$USER_HOME/.gitconfig"
     chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
-    install --owner "$SUDO_USER" --group "$SUDO_USER" \
-        "$SCRIPT_DIR"/gitignore_global /home/"$SUDO_USER"/.gitignore_global
+    installUser "$USER_HOME"/.gitignore_global "$SCRIPT_DIR"/gitignore_global
 fi
 
 add_user_to_group "$SUDO_USER" dialout
@@ -510,8 +512,7 @@ else
         echo 'eval "$(direnv hook bash)"'
         echo 'eval "$(starship init bash)"'
     ) >> "$USER_RC"
-    chown "$SUDO_USER:$SUDO_USER" -R /home/"$SUDO_USER"/.bashrc
-    install --owner "$SUDO_USER" --group "$SUDO_USER" \
-        "$SCRIPT_DIR"/starship.toml /home/"$SUDO_USER"/.config/starship.toml
+    chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.bashrc
+    installUser "$USER_HOME"/.config/starship.toml "$SCRIPT_DIR"/starship.toml
     show_done
 fi
