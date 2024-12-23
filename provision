@@ -330,7 +330,7 @@ fi
 show_done
 
 show "Setting up Docker..."
-if docker run hello-world; then
+if command -v docker > /dev/null; then
     show 'Already installed. Skipping!'
 else
     for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
@@ -431,7 +431,7 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
     defaultBranch = main' > "$USER_HOME/.gitconfig"
     chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
     cp -v "$SCRIPT_DIR"/gitignore_global "$USER_HOME"/.gitignore_global 
-    chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitignore_global
+    chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.gitignore_global
 fi
 
 add_user_to_group "$SUDO_USER" dialout
