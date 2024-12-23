@@ -179,17 +179,6 @@ else
 fi
 show_done
 
-show "Installing Nix..."
-if [ -e /etc/.nix-installed ]; then
-    show 'Already installed. Skipping!'
-else
-    sh <(curl -L https://nixos.org/nix/install) --daemon --yes
-    echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
-    installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/nix.conf"
-    touch /etc/.nix-installed
-fi
-show_done
-
 show "Installing Signal..."
 # Taken from https://signal.org/en/download/linux/
 # NOTE: These instructions only work for 64 bit Debian-based
@@ -486,6 +475,17 @@ show_done
 
 show "Installing gdbinit..."
 cp -v "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
+show_done
+
+show "Installing Nix..."
+if [ -e /etc/.nix-installed ]; then
+    show 'Already installed. Skipping!'
+else
+    sh <(curl -L https://nixos.org/nix/install) --daemon --yes
+    echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
+    installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/nix.conf"
+    touch /etc/.nix-installed
+fi
 show_done
 
 show "Cleaning up via autoremove..."
