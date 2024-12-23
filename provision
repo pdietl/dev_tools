@@ -24,10 +24,11 @@ installUser() {
     dest_dir=$1
     file_to_copy=${2:-}
 
-    install --owner "$SUDO_USER" --group "$SUDO_USER" -d "$dest_dir"
+    mkdir -v -p "$dest_dir"
+    chown -v -R "$SUDO_USER":"$SUDO_USER" "$dest_dir"
 
     if [ -n "$file_to_copy" ]; then
-        install --owner "$SUDO_USER" --group "$SUDO_USER" -t "$dest_dir" "$@"
+        install -v --owner "$SUDO_USER" --group "$SUDO_USER" -t "$dest_dir" "$file_to_copy"
     fi
 }
 
@@ -243,7 +244,9 @@ else
     wget -O /tmp/nvim.tgz https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz
     tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
     rm /tmp/nvim.tgz
-    installUser "$USER_HOME"/.config/nvim "$SCRIPT_DIR"/nvim/*
+    installUser "$USER_HOME"/.config/nvim
+    cp -v -r "$SCRIPT_DIR"/nvim/* "$USER_HOME"/.config/nvim
+    chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.config/nvim
 fi
 show_done
 
@@ -427,7 +430,8 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
 [init]
     defaultBranch = main' > "$USER_HOME/.gitconfig"
     chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
-    installUser "$USER_HOME"/.gitignore_global "$SCRIPT_DIR"/gitignore_global
+    cp -v "$SCRIPT_DIR"/gitignore_global "$USER_HOME"/.gitignore_global 
+    chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitignore_global
 fi
 
 add_user_to_group "$SUDO_USER" dialout
@@ -474,7 +478,7 @@ udevadm control --reload
 show_done
 
 show "Installing gdbinit..."
-cp -v "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
+installUser "$USER_HOME" "$SCRIPT_DIR"/gdbinit
 show_done
 
 show "Installing Nix..."
@@ -513,6 +517,6 @@ else
         echo 'eval "$(starship init bash)"'
     ) >> "$USER_RC"
     chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.bashrc
-    installUser "$USER_HOME"/.config/starship.toml "$SCRIPT_DIR"/starship.toml
+    installUser "$USER_HOME"/.config "$SCRIPT_DIR"/starship.toml
     show_done
 fi
