@@ -372,7 +372,7 @@ show "Installing default vimrc..."
 if [ -e "/home/$SUDO_USER/.vimrc" ]; then
     show 'Already installed. Skipping!'
 else
-    cp -v "$SCRIPT_DIR"/vimrc "$USER_HOME/.vimrc
+    cp -v "$SCRIPT_DIR"/vimrc "$USER_HOME"/.vimrc
     chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.vimrc
     installUser "$USER_HOME"/.vim/pack/plugins/start/cscope/plugin/ "$SCRIPT_DIR"/cscope_maps.vim
     installUser "$USER_HOME"/.vim/spell
@@ -383,7 +383,7 @@ show "Installing default tmux conf..."
 if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
     show 'Already installed. Skipping!'
 else
-    cp -v $SCRIPT_DIR"/tmux.conf "$USER_HOME"/.tmux.conf
+    cp -v "$SCRIPT_DIR"/tmux.conf "$USER_HOME"/.tmux.conf
     chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux.conf
     show_done
 fi
