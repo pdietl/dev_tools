@@ -3,6 +3,4 @@
 sudo apt-get update
 sudo apt-get upgrade -y
 sudo snap refresh
-sudo snap refresh snap-store
-sudo snap refresh
 sudo apt-get autoremove -y

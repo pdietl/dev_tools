@@ -416,7 +416,9 @@ declare -r BIN_DEST=$USER_HOME/bin
 
 show "Installing user binaries into $BIN_DEST..."
 if ! [ -e "$BIN_DEST" ]; then
-    installUser "$BIN_DEST" "$SCRIPT_DIR"/bin/*
+    mkdir -p "$BIN_DEST"
+    cp -v -r "$SCRIPT_DIR"/bin/* "$BIN_DEST"
+    chown "$SUDO_USER:$SUDO_USER" -R "$BIN_DEST"
     show_done
 else
     show "$BIN_DEST already exists. Skipping!"
