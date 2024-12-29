@@ -163,11 +163,13 @@ apt-get install -y \
     tmate \
     tmux \
     tree \
+    usbutils \
     uuid \
     uuid-dev \
     valgrind \
     vim \
     virtualenv \
+    xsel \
     zip \
     zlib1g-dev
 show_done
@@ -383,8 +385,10 @@ show "Installing default tmux conf..."
 if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
     show 'Already installed. Skipping!'
 else
+    git clone https://github.com/tmux-plugins/tpm "$USER_HOME"/.tmux/plugins/tpm
     cp -v "$SCRIPT_DIR"/tmux.conf "$USER_HOME"/.tmux.conf
     chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux.conf
+    chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux
     show_done
 fi
 
