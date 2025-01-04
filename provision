@@ -119,6 +119,7 @@ apt-get install -y \
     dos2unix \
     exuberant-ctags \
     flex \
+    fzf \
     gawk \
     gcc-multilib \
     gdb-multiarch \
