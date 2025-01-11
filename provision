@@ -243,6 +243,14 @@ else
 fi
 show_done
 
+show "Installing NVM and node..."
+if command -v nvm > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    sudo -u "$SUDO_USER" bash -c "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+    sudo -u "$SUDO_USER" bash -c "nvm install node"
+fi
+show_done
 show "Installing Neovim..."
 if command -v nvim > /dev/null; then
     show 'Already installed. Skipping!'
