@@ -248,9 +248,9 @@ show "Installing google-drive-ocamlfuse..."
 if command -v google-drive-ocamlfuse > /dev/null; then
     show 'Already installed. Skipping!'
 else
-    sudo add-apt-repository ppa:alessandro-strada/ppa
+    sudo add-apt-repository -y ppa:alessandro-strada/ppa
     sudo apt-get update
-    sudo apt-get install google-drive-ocamlfuse
+    sudo apt-get install -y google-drive-ocamlfuse
 fi
 
 show "Installing NVM and node..."
@@ -525,12 +525,14 @@ fi
 show_done
 
 show "Installing 0xProto Nerd Font"
-if ! [ -e "$USER_HOME/.fonts/0xProtoNerdFontMono-Regular.ttf" ]; then
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif ! [ -e "$USER_HOME/.fonts/0xProtoNerdFontMono-Regular.ttf" ]; then
     wget -O /tmp/nerdfont.zip https://github.com/ryanoasis/nerd-fonts/releases/download/v3.3.0/0xProto.zip
-    mkdir "$USER_HOME"/.fonts
-    aunpack --extract-to "$USER_HOME"/.fonts /tmp/nerdfonts.zip
+    mkdir -p "$USER_HOME"/.fonts
+    aunpack --extract-to "$USER_HOME"/.fonts /tmp/nerdfont.zip
     rm /tmp/nerdfont.zip
-    rm "$USER_HOME"/{LICENSE,README.md}
+    rm "$USER_HOME"/.fonts/{LICENSE,README.md}
     chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.fonts
     profile=$(gsettings get org.gnome.Terminal.ProfilesList default)
     profile=${profile:1:-1} # remove leading and trailing single quotes
