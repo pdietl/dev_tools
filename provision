@@ -117,6 +117,7 @@ apt-get install -y \
     device-tree-compiler \
     direnv \
     dos2unix \
+    efibootmgr \
     exuberant-ctags \
     flex \
     fzf \
@@ -513,6 +514,21 @@ else
     touch /etc/.nix-installed
 fi
 show_done
+
+show "Installing 0xProto Nerd Font"
+if ! [ -e "$USER_HOME/.fonts/0xProtoNerdFontMono-Regular.ttf" ]; then
+    wget -O /tmp/nerdfont.zip https://github.com/ryanoasis/nerd-fonts/releases/download/v3.3.0/0xProto.zip
+    mkdir "$USER_HOME"/.fonts
+    aunpack --extract-to "$USER_HOME"/.fonts /tmp/nerdfonts.zip
+    rm /tmp/nerdfont.zip
+    rm "$USER_HOME"/{LICENSE,README.md}
+    chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.fonts
+    profile=$(gsettings get org.gnome.Terminal.ProfilesList default)
+    profile=${profile:1:-1} # remove leading and trailing single quotes
+    gsettings set "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$profile/" font '0xProto Nerd Font 14'
+else
+    show 'Already installed. Skipping!'
+fi
 
 show "Cleaning up via autoremove..."
 apt-get autoremove -y
