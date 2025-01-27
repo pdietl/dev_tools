@@ -244,6 +244,15 @@ else
 fi
 show_done
 
+show "Installing google-drive-ocamlfuse..."
+if command -v google-drive-ocamlfuse > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    sudo add-apt-repository ppa:alessandro-strada/ppa
+    sudo apt-get update
+    sudo apt-get install google-drive-ocamlfuse
+fi
+
 show "Installing NVM and node..."
 if [ -e "$USER_HOME/.nvm_installed" ]; then
     show 'Already installed. Skipping!'
