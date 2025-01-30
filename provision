@@ -97,6 +97,7 @@ show_done
 
 show "Installing packages..."
 apt-get install -y \
+    apt-show-versions \
     aptitude \
     asciinema \
     atool \
@@ -108,6 +109,7 @@ apt-get install -y \
     btop \
     build-essential \
     ccache \
+    clang \
     clang-format \
     cmake \
     cppcheck \
@@ -146,6 +148,7 @@ apt-get install -y \
     openssh-server \
     openssh-server \
     p7zip-full \
+    parted \
     picocom \
     pipx \
     pre-commit \
@@ -420,7 +423,7 @@ rm -rf "$USER_HOME"/{Public,Templates,Music}
 show_done
 
 show "Adding useful home directories..."
-dir_list=$(echo -n "$USER_HOME"/{Applications,Downloads,Learn,Repos})
+dir_list=$(echo -n "$USER_HOME"/{Applications,Downloads,GoogleDrive,Learn,Repos})
 mkdir -p $dir_list
 chown "$SUDO_USER:$SUDO_USER" -R $dir_list
 show_done
