@@ -190,6 +190,30 @@ else
 fi
 show_done
 
+show "Installing Brave browser.."
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif command -v brave-browser > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    curl -fsS https://dl.brave.com/install.sh | sh
+fi
+show_done
+
+show "Installing Synaptics Display Link driver..."
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif dpkg-query -Wf'${db:Status-abbrev}' displaylink-driver 2>/dev/null | grep -q '^i'; then
+    show 'Already installed. Skipping!'
+else
+    wget -O /tmp/synaptics-keyring.deb https://www.synaptics.com/sites/default/files/Ubuntu/pool/stable/main/all/synaptics-repository-keyring.deb
+    sudo apt-get install -y /tmp/synaptics-keyring.deb
+    sudo apt-get update
+    sudo apt-get install -y displaylink-driver
+    rm /tmp/synaptics-keyring.deb
+fi
+show_done
+
 show "Installing Signal..."
 # Taken from https://signal.org/en/download/linux/
 # NOTE: These instructions only work for 64 bit Debian-based
@@ -280,17 +304,18 @@ else
 fi
 show_done
 
-show "Installing Google Chrome..."
-if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
-elif command -v google-chrome > /dev/null; then
-    show 'Already installed. Skipping!'
-else
-    wget -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-    apt-get install -y /tmp/google-chrome.deb
-    rm /tmp/google-chrome.deb
-fi
-show_done
+# Using Brave rn
+# show "Installing Google Chrome..."
+# if in_wsl; then
+#     show 'This is a WSL machine. Skipping!'
+# elif command -v google-chrome > /dev/null; then
+#     show 'Already installed. Skipping!'
+# else
+#     wget -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+#     apt-get install -y /tmp/google-chrome.deb
+#     rm /tmp/google-chrome.deb
+# fi
+# show_done
 
 show "Installing 1Password GUI..."
 if in_wsl; then
@@ -306,7 +331,7 @@ else
         /etc/debsig/policies/AC2D62742012EA22/1password.pol
     mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
     curl -sS https://downloads.1password.com/linux/keys/1password.asc \
-        --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg > gpg
+        --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
     apt-get update
     apt-get install -y 1password
 fi
@@ -492,7 +517,7 @@ elif command -v gsettings > /dev/null; then
     show_done
     show "Setting GNOME desktop favorite apps..."
     favorite_apps="[
-        'google-chrome.desktop',
+        'brave-browser.desktop',
         'org.gnome.Nautilus.desktop',
         'signal-desktop.desktop',
         'discord.desktop',

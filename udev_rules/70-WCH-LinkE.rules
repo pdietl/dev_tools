@@ -1,2 +1,2 @@
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="8010", ACTION=="add", MODE="0660", TAG+="uaccess" # RV mode
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="8012", ACTION=="add", MODE="0660", TAG+="uaccess" # DAP mode
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="8010", ACTION=="add", MODE:="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="8012", ACTION=="add", MODE:="0660", TAG+="uaccess"
