@@ -108,9 +108,11 @@ apt-get install -y \
     bison \
     btop \
     build-essential \
+    can-utils \
     ccache \
     clang \
     clang-format \
+    clangd \
     cmake \
     cppcheck \
     cscope \
@@ -119,9 +121,11 @@ apt-get install -y \
     device-tree-compiler \
     direnv \
     dos2unix \
+    dpkg-dev \
     efibootmgr \
     exuberant-ctags \
     flex \
+    fd-find \
     fzf \
     gawk \
     gcc-multilib \
@@ -132,24 +136,36 @@ apt-get install -y \
     groff \
     htop \
     hwinfo \
+    icoutils \
+    imagemagick \
     indent \
+    inotify-tools \
+    iperf3 \
     jq \
+    jsonlint \
     libssl-dev \
     libvirt-clients \
     libvirt-dev \
+    lbzip2 \
     linux-tools-generic \
     lua5.1 \
     luarocks \
+    meson \
     nasm \
     net-tools \
+    nfs-kernel-server \
+    nmap \
     ninja-build \
     openjdk-8-jdk \
     openjdk-8-jdk-headless \
     openssh-server \
     openssh-server \
     p7zip-full \
+    pbzip2 \
     parted \
     picocom \
+    pigz \
+    pkg-config \
     pipx \
     pre-commit \
     protobuf-compiler \
@@ -157,29 +173,45 @@ apt-get install -y \
     python3-pip \
     python3-stestr \
     python3-venv \
+    qemu-system \
     qemu-system-x86 \
+    qemu-user-static \
     remake \
     ripgrep \
     rlwrap \
     rpm \
     ruby \
     ruby-dev \
+    samba \
     shellcheck \
+    shfmt \
+    smbclient \
+    socat \
+    speedtest-cli \
     sshfs \
+    sshpass \
     strace \
     texinfo \
     tmate \
     tmux \
     tree \
+    tshark \
     usbutils \
     uuid \
     uuid-dev \
     valgrind \
     vim \
+    vite \
     virtualenv \
+    whois \
+    wireguard \
+    wireguard-tools \
+    wireshark \
     xsel \
+    yamllint \
     zip \
-    zlib1g-dev
+    zlib1g-dev \
+    zstd
 show_done
 
 show "Installing Starship..."
@@ -254,6 +286,29 @@ elif command -v slack > /dev/null; then
     show 'Already installed. Skipping!'
 else
     snap install slack
+fi
+show_done
+
+show "Installing Saleae Logic2..."
+if in_wsl; then
+    show 'This is a WSL machine. Skipping!'
+elif dpkg-query -Wf'${db:Status-abbrev}' saleae-logic2 2>/dev/null | grep -q '^i'; then
+    show 'Already installed. Skipping!'
+else
+    tmp=$(mktemp -d)
+    git clone https://github.com/pdietl/saleae-logic2-appimage-to-deb.git "$tmp"
+    pushd "$tmp"
+    ./build-logic2-deb.sh
+    deb_file=$(ls -1 "$HOME"/saleae-logic2_*.deb 2>/dev/null | head -1)
+    if [ -n "$deb_file" ]; then
+        apt-get install -y "$deb_file"
+        rm "$deb_file"
+    else
+        echo "Error: deb file not found!"
+        exit 1
+    fi
+    popd
+    rm -rf "$tmp"
 fi
 show_done
 
@@ -381,6 +436,29 @@ else
 
     # Print Go Version
     /usr/local/go/bin/go version
+fi
+show_done
+
+show "Installing Bazelisk..."
+if command -v bazelisk > /dev/null; then
+    show 'Already installed. Skipping!'
+else
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        *) echo "Unsupported architecture: $arch"; exit 1 ;;
+    esac
+    latest=$(curl -sS https://api.github.com/repos/bazelbuild/bazelisk/releases/latest | jq -r '.tag_name')
+    if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+        echo "Error determining latest Bazelisk version!"
+        exit 1
+    fi
+    url="https://github.com/bazelbuild/bazelisk/releases/download/${latest}/bazelisk-linux-${arch}"
+    echo "Downloading Bazelisk $latest for linux-$arch..."
+    wget -O /usr/local/bin/bazelisk "$url"
+    chmod +x /usr/local/bin/bazelisk
+    ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
 fi
 show_done
 

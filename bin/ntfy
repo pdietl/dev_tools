@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+curl -d "$1" ntfy.sh/pete-notify
