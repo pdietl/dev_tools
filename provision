@@ -81,6 +81,13 @@ export DEBIAN_FRONTEND=noninteractive
 echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections
 
 # =============================================================================
+banner "Bootstrap: install curl"
+# =============================================================================
+
+_apt_get update
+_apt_get install -y curl
+
+# =============================================================================
 banner "Preparing apt sources"
 # =============================================================================
 
@@ -305,9 +312,7 @@ elif command -v slack > /dev/null; then
     echo "  Slack: already installed"
 else
     echo "  Slack: installing..."
-    _wget -O /tmp/slack.deb 'https://slack.com/downloads/instructions/linux?ddl=1&build=deb'
-    _apt_get install -y /tmp/slack.deb
-    rm /tmp/slack.deb
+    snap install slack
 fi
 
 if in_wsl; then
@@ -338,8 +343,8 @@ else
     echo "  awscli: installing..."
     tmp=$(mktemp -d)
     pushd "$tmp" > /dev/null
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-    unzip awscliv2.zip
+    curl -sS "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip -q awscliv2.zip
     ./aws/install
     popd > /dev/null
     rm -rf "$tmp"
@@ -391,7 +396,7 @@ else
         echo "Error determining latest Go version!"
         exit 1
     fi
-    _wget --show-progress "https://go.dev/dl/$latest"
+    _wget "https://go.dev/dl/$latest"
     rm -rf /usr/local/go
     tar -C /usr/local -xzf "$latest"
     _mkdir -p "$USER_HOME"/go/{bin,pkg,src}
@@ -425,7 +430,7 @@ if [ -e /etc/.nix-installed ]; then
     echo "  Nix: already installed"
 else
     echo "  Nix: installing..."
-    printf 'n\ny\n' | sh <(curl -L https://nixos.org/nix/install) --daemon 2>&1 | grep -E '^\~\~>|error|warning' || true
+    printf 'n\ny\n' | sh <(curl -L https://nixos.org/nix/install) --daemon 2>&1 | grep -E '^\~\~>|error|warning' | grep -v 'is greater than SYS_UID_MAX' || true
     echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
     installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/nix.conf"
     touch /etc/.nix-installed
