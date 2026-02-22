@@ -181,6 +181,7 @@ declare -a packages=(
     ddd
     device-tree-compiler
     direnv
+    dkms
     docker-buildx-plugin
     docker-ce
     docker-ce-cli
