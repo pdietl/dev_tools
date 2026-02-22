@@ -18,17 +18,25 @@ declare -r USER_HOME=/home/$SUDO_USER
 declare -r USER_RC=$USER_HOME/.bashrc
 declare -a path_additions=('"$HOME"/bin' '"$HOME"/.local/bin')
 
+# ---------------------------------------------------------------------------
+# Command wrappers -- tweak common flags (e.g. verbosity) in one place
+# ---------------------------------------------------------------------------
+_wget()     { wget -q "$@"; }
+_cp()       { cp -v "$@"; }
+_mkdir()    { mkdir -v "$@"; }
+_chown()    { chown "$@"; }
+_install()  { install -v "$@"; }
+_apt_get()  { apt-get -qq "$@"; }
+
 installUser() {
     local dest_dir
     local file_to_copy
     dest_dir=$1
     file_to_copy=${2:-}
-
-    mkdir -v -p "$dest_dir"
-    chown -v -R "$SUDO_USER":"$SUDO_USER" "$dest_dir"
-
+    _mkdir -p "$dest_dir"
+    _chown -R "$SUDO_USER":"$SUDO_USER" "$dest_dir"
     if [ -n "$file_to_copy" ]; then
-        install -v --owner "$SUDO_USER" --group "$SUDO_USER" -t "$dest_dir" "$file_to_copy"
+        _install --owner "$SUDO_USER" --group "$SUDO_USER" -t "$dest_dir" "$file_to_copy"
     fi
 }
 
@@ -36,412 +44,365 @@ in_wsl() {
     [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]
 }
 
-show() {
+banner() {
     echo
-    echo "***"
-    echo "*** $*"
-    echo "***"
-    echo
-}
-
-show_done() {
-    show "Done."
-}
-
-file_append_line() {
-    local file=$1
-    local line=$2
-
-    echo -n "Checking file '$file' for line '$line'... "
-
-    if ! grep -q -F "$line" "$file"; then
-        echo "no, appending"
-        echo "$line" >> "$file"
-    else
-        echo "yes"
-    fi
+    echo "==== $* ===="
 }
 
 add_user_to_group() {
     local user=$1
     local group=$2
-
-    show "Adding user '$user' to the '$group' group..."
     if groups "$user" | grep -q "$group"; then
-        show "User '$user' is already a member of the '$group' group. Skipping!"
+        echo "  Group '$group': already a member"
     else
         usermod -a -G "$group" "$user"
-        show_done
+        echo "  Group '$group': added '$user'"
     fi
 }
 
 if [[ $EUID -ne 0 ]]; then
-    show "This script must be run as root"
+    echo "Error: this script must be run as root"
     exit 1
 fi
 
 if [ -z "${SUDO_USER:-}" ]; then
-    echo "ERROR! The 'SUDO_USER' variable is blank! I was depending on that to determine who called me. :(" >&2
+    echo "Error: SUDO_USER is blank, can't determine who called me" >&2
     exit 1
 fi
 
 if ! grep -q 'ubuntu' /etc/os-release; then
-    echo "Error: I don't think you're running Ubuntu and I only know how to initialize that system." >&2
+    echo "Error: this script only supports Ubuntu" >&2
     exit 1
 fi
 
-show "Updating packages..."
-apt-get update
-apt-get upgrade -y
-show_done
+export DEBIAN_FRONTEND=noninteractive
 
-show "Installing packages..."
-apt-get install -y \
-    apt-show-versions \
-    aptitude \
-    asciinema \
-    atool \
-    autoconf \
-    autopoint \
-    autossh \
-    autotools-dev \
-    bison \
-    btop \
-    build-essential \
-    can-utils \
-    ccache \
-    clang \
-    clang-format \
-    clangd \
-    cmake \
-    cppcheck \
-    cscope \
-    curl \
-    ddd \
-    device-tree-compiler \
-    direnv \
-    dos2unix \
-    dpkg-dev \
-    efibootmgr \
-    exuberant-ctags \
-    flex \
-    fd-find \
-    fzf \
-    gawk \
-    gcc-multilib \
-    gdb-multiarch \
-    gnome-tweaks \
-    gparted \
-    graphviz \
-    groff \
-    htop \
-    hwinfo \
-    icoutils \
-    imagemagick \
-    indent \
-    inotify-tools \
-    iperf3 \
-    jq \
-    jsonlint \
-    libssl-dev \
-    libvirt-clients \
-    libvirt-dev \
-    lbzip2 \
-    linux-tools-generic \
-    lua5.1 \
-    luarocks \
-    meson \
-    nasm \
-    net-tools \
-    nfs-kernel-server \
-    nmap \
-    ninja-build \
-    openjdk-8-jdk \
-    openjdk-8-jdk-headless \
-    openssh-server \
-    openssh-server \
-    p7zip-full \
-    pbzip2 \
-    parted \
-    picocom \
-    pigz \
-    pkg-config \
-    pipx \
-    pre-commit \
-    protobuf-compiler \
-    pv \
-    python3-pip \
-    python3-stestr \
-    python3-venv \
-    qemu-system \
-    qemu-system-x86 \
-    qemu-user-static \
-    remake \
-    ripgrep \
-    rlwrap \
-    rpm \
-    ruby \
-    ruby-dev \
-    samba \
-    shellcheck \
-    shfmt \
-    smbclient \
-    socat \
-    speedtest-cli \
-    sshfs \
-    sshpass \
-    strace \
-    texinfo \
-    tmate \
-    tmux \
-    tree \
-    tshark \
-    usbutils \
-    uuid \
-    uuid-dev \
-    valgrind \
-    vim \
-    vite \
-    virtualenv \
-    whois \
-    wireguard \
-    wireguard-tools \
-    wireshark \
-    xsel \
-    yamllint \
-    zip \
-    zlib1g-dev \
-    zstd
-show_done
+# Preseed wireshark to allow non-root capture so the 'wireshark' group is created
+echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections
 
-show "Installing Starship..."
-if command -v starship > /dev/null; then
-    show 'Already installed. Skipping!'
+# =============================================================================
+banner "Preparing apt sources"
+# =============================================================================
+
+declare -a docker_conflicts=()
+for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+    if dpkg-query -Wf'${db:Status-abbrev}' "$pkg" 2>/dev/null | grep -q '^i'; then
+        docker_conflicts+=("$pkg")
+    fi
+done
+if [ ${#docker_conflicts[@]} -gt 0 ]; then
+    echo "  Removing conflicting Docker packages: ${docker_conflicts[*]}"
+    _apt_get remove -y "${docker_conflicts[@]}"
 else
+    echo "  No conflicting Docker packages found"
+fi
+
+if ! in_wsl; then
+    echo "  Adding Signal apt source..."
+    wget -qO- https://updates.signal.org/desktop/apt/keys.asc \
+        | gpg --batch --yes --dearmor -o /usr/share/keyrings/signal-desktop-keyring.gpg
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main' \
+        > /etc/apt/sources.list.d/signal-xenial.list
+
+    echo "  Adding 1Password apt source..."
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
+        | gpg --batch --yes --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' \
+        > /etc/apt/sources.list.d/1password.list
+    _mkdir -p /etc/debsig/policies/AC2D62742012EA22/
+    curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol \
+        > /etc/debsig/policies/AC2D62742012EA22/1password.pol
+    _mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
+        --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
+fi
+
+echo "  Adding Docker apt source..."
+_install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+rm -f /etc/apt/sources.list.d/docker.list
+echo \
+    "deb [arch=$(dpkg --print-architecture)" \
+    'signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu' \
+    "$(. /etc/os-release && echo "$VERSION_CODENAME") stable" > \
+    /etc/apt/sources.list.d/docker.list
+
+echo "  Adding google-drive-ocamlfuse PPA..."
+add-apt-repository --no-update -y ppa:alessandro-strada/ppa > /dev/null 2>&1
+
+declare -a deb_files=()
+if ! in_wsl && ! command -v discord > /dev/null; then
+    echo "  Downloading Discord .deb..."
+    _wget -O /tmp/discord.deb 'https://discordapp.com/api/download?platform=linux&format=deb'
+    deb_files+=(/tmp/discord.deb)
+fi
+
+# =============================================================================
+banner "Installing packages"
+# =============================================================================
+
+echo "  Updating package lists..."
+_apt_get update
+echo "  Upgrading installed packages..."
+_apt_get upgrade -y
+echo "  Installing packages..."
+
+declare -a packages=(
+    apt-show-versions
+    aptitude
+    asciinema
+    atool
+    autoconf
+    autopoint
+    autossh
+    autotools-dev
+    bison
+    btop
+    build-essential
+    can-utils
+    ccache
+    clang
+    clang-format
+    clangd
+    cmake
+    containerd.io
+    cppcheck
+    cscope
+    curl
+    ddd
+    device-tree-compiler
+    direnv
+    docker-buildx-plugin
+    docker-ce
+    docker-ce-cli
+    docker-compose-plugin
+    dos2unix
+    dpkg-dev
+    efibootmgr
+    exuberant-ctags
+    fd-find
+    flex
+    fzf
+    gawk
+    gcc-multilib
+    gdb-multiarch
+    gnome-tweaks
+    google-drive-ocamlfuse
+    gparted
+    graphviz
+    groff
+    htop
+    hwinfo
+    icoutils
+    imagemagick
+    indent
+    inotify-tools
+    iperf3
+    jq
+    jsonlint
+    lbzip2
+    libssl-dev
+    libvirt-clients
+    libvirt-dev
+    linux-tools-generic
+    lua5.1
+    luarocks
+    meson
+    nasm
+    net-tools
+    nfs-kernel-server
+    ninja-build
+    nmap
+    openjdk-8-jdk
+    openjdk-8-jdk-headless
+    openssh-server
+    p7zip-full
+    parted
+    pbzip2
+    picocom
+    pigz
+    pipx
+    pkg-config
+    pre-commit
+    protobuf-compiler
+    pv
+    python3-pip
+    python3-stestr
+    python3-venv
+    qemu-system
+    qemu-system-x86
+    qemu-user-static
+    remake
+    ripgrep
+    rlwrap
+    rpm
+    ruby
+    ruby-dev
+    samba
+    shellcheck
+    shfmt
+    smbclient
+    socat
+    speedtest-cli
+    sshfs
+    sshpass
+    strace
+    texinfo
+    tmate
+    tmux
+    tree
+    tshark
+    usbutils
+    uuid
+    uuid-dev
+    valgrind
+    vim
+    vite
+    virtualenv
+    whois
+    wireguard
+    wireguard-tools
+    wireshark
+    xsel
+    yamllint
+    zip
+    zlib1g-dev
+    zstd
+)
+
+if ! in_wsl; then
+    packages+=(signal-desktop 1password)
+fi
+
+_apt_get install -y "${packages[@]}" ${deb_files[@]+"${deb_files[@]}"}
+for f in "${deb_files[@]+"${deb_files[@]}"}"; do rm -f "$f"; done
+
+# =============================================================================
+banner "Installing additional tools"
+# =============================================================================
+
+if command -v starship > /dev/null; then
+    echo "  Starship: already installed"
+else
+    echo "  Starship: installing..."
     sh <(curl -sS https://starship.rs/install.sh) -y
 fi
-show_done
 
-show "Installing Brave browser.."
 if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
+    echo "  Brave: skipped (WSL)"
 elif command -v brave-browser > /dev/null; then
-    show 'Already installed. Skipping!'
+    echo "  Brave: already installed"
 else
+    echo "  Brave: installing..."
     curl -fsS https://dl.brave.com/install.sh | sh
 fi
-show_done
 
-show "Installing Synaptics Display Link driver..."
 if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
-elif dpkg-query -Wf'${db:Status-abbrev}' displaylink-driver 2>/dev/null | grep -q '^i'; then
-    show 'Already installed. Skipping!'
-else
-    wget -O /tmp/synaptics-keyring.deb https://www.synaptics.com/sites/default/files/Ubuntu/pool/stable/main/all/synaptics-repository-keyring.deb
-    sudo apt-get install -y /tmp/synaptics-keyring.deb
-    sudo apt-get update
-    sudo apt-get install -y displaylink-driver
-    rm /tmp/synaptics-keyring.deb
-fi
-show_done
-
-show "Installing Signal..."
-# Taken from https://signal.org/en/download/linux/
-# NOTE: These instructions only work for 64 bit Debian-based
-# Linux distributions such as Ubuntu, Mint etc.
-if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
-elif command -v signal-desktop > /dev/null; then
-    show 'Already installed. Skipping!'
-else
-    # 1. Install our official public software signing key
-    wget -O- https://updates.signal.org/desktop/apt/keys.asc | gpg --dearmor > /tmp/signal-desktop-keyring.gpg
-    cat /tmp/signal-desktop-keyring.gpg > /usr/share/keyrings/signal-desktop-keyring.gpg
-
-    # 2. Add our repository to your list of repositories
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main' > /etc/apt/sources.list.d/signal-xenial.list
-
-    # 3. Update your package database and install signal
-    apt-get update && apt-get install -y signal-desktop
-fi
-show_done
-
-show "Installing Discord..."
-if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
-elif command -v discord > /dev/null; then
-    show 'Already installed. Skipping!'
-else
-    wget -O /tmp/discord.deb 'https://discordapp.com/api/download?platform=linux&format=deb'
-    apt-get install -y /tmp/discord.deb
-    rm /tmp/discord.deb
-fi
-show_done
-
-show "Installing Slack..."
-if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
+    echo "  Slack: skipped (WSL)"
 elif command -v slack > /dev/null; then
-    show 'Already installed. Skipping!'
+    echo "  Slack: already installed"
 else
-    snap install slack
+    echo "  Slack: installing..."
+    _wget -O /tmp/slack.deb 'https://slack.com/downloads/instructions/linux?ddl=1&build=deb'
+    _apt_get install -y /tmp/slack.deb
+    rm /tmp/slack.deb
 fi
-show_done
 
-show "Installing Saleae Logic2..."
 if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
+    echo "  Saleae Logic2: skipped (WSL)"
 elif dpkg-query -Wf'${db:Status-abbrev}' saleae-logic2 2>/dev/null | grep -q '^i'; then
-    show 'Already installed. Skipping!'
+    echo "  Saleae Logic2: already installed"
 else
+    echo "  Saleae Logic2: installing..."
     tmp=$(mktemp -d)
     git clone https://github.com/pdietl/saleae-logic2-appimage-to-deb.git "$tmp"
-    pushd "$tmp"
+    pushd "$tmp" > /dev/null
     ./build-logic2-deb.sh
-    deb_file=$(ls -1 "$HOME"/saleae-logic2_*.deb 2>/dev/null | head -1)
+    deb_file=$(ls -1 "$tmp"/saleae-logic2_*.deb 2>/dev/null | head -1)
     if [ -n "$deb_file" ]; then
-        apt-get install -y "$deb_file"
+        _apt_get install -y "$deb_file"
         rm "$deb_file"
     else
-        echo "Error: deb file not found!"
+        echo "Error: Saleae deb file not found!"
         exit 1
     fi
-    popd
+    popd > /dev/null
     rm -rf "$tmp"
 fi
-show_done
 
-show "Installing awscli..."
 if command -v aws > /dev/null; then
-    show 'Already installed. Skipping!'
+    echo "  awscli: already installed"
 else
+    echo "  awscli: installing..."
     tmp=$(mktemp -d)
-    pushd "$tmp"
+    pushd "$tmp" > /dev/null
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
     unzip awscliv2.zip
     ./aws/install
-    popd
+    popd > /dev/null
     rm -rf "$tmp"
 fi
-show_done
 
-show "Installing google-drive-ocamlfuse..."
-if command -v google-drive-ocamlfuse > /dev/null; then
-    show 'Already installed. Skipping!'
-else
-    sudo add-apt-repository -y ppa:alessandro-strada/ppa
-    sudo apt-get update
-    sudo apt-get install -y google-drive-ocamlfuse
-fi
-
-show "Installing NVM and node..."
 if [ -e "$USER_HOME/.nvm_installed" ]; then
-    show 'Already installed. Skipping!'
+    echo "  NVM + node: already installed"
 else
-    sudo -u "$SUDO_USER" bash -c "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+    nvm_latest=$(curl -sS https://api.github.com/repos/nvm-sh/nvm/releases/latest | jq -r '.tag_name')
+    if [ -z "$nvm_latest" ] || [ "$nvm_latest" = "null" ]; then
+        echo "Error determining latest NVM version!"
+        exit 1
+    fi
+    echo "  NVM $nvm_latest + node: installing..."
+    sudo -u "$SUDO_USER" bash -c "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/$nvm_latest/install.sh | bash"
     sudo -u "$SUDO_USER" bash -c "export NVM_DIR='$USER_HOME/.nvm' && source \"\$NVM_DIR/nvm.sh\" && nvm install node"
     touch "$USER_HOME/.nvm_installed"
-    chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.nvm_installed"
+    _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.nvm_installed"
 fi
-show_done
 
-show "Installing Neovim..."
 if command -v nvim > /dev/null; then
-    show 'Already installed. Skipping!'
+    echo "  Neovim: already installed"
 else
-    wget -O /tmp/nvim.tgz https://github.com/neovim/neovim/releases/latest/download/nvim-linux-$(uname -m).tar.gz
+    echo "  Neovim: installing..."
+    _wget -O /tmp/nvim.tgz https://github.com/neovim/neovim/releases/latest/download/nvim-linux-$(uname -m).tar.gz
     tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
     rm /tmp/nvim.tgz
     installUser "$USER_HOME"/.config/nvim
-    cp -v -r "$SCRIPT_DIR"/nvim/* "$USER_HOME"/.config/nvim
-    chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.config/nvim
+    _cp -r "$SCRIPT_DIR"/nvim/* "$USER_HOME"/.config/nvim
+    _chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.config/nvim
 fi
-show_done
 
-# Using Brave rn
-# show "Installing Google Chrome..."
-# if in_wsl; then
-#     show 'This is a WSL machine. Skipping!'
-# elif command -v google-chrome > /dev/null; then
-#     show 'Already installed. Skipping!'
-# else
-#     wget -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-#     apt-get install -y /tmp/google-chrome.deb
-#     rm /tmp/google-chrome.deb
-# fi
-# show_done
-
-show "Installing 1Password GUI..."
-if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
-elif command -v 1password > /dev/null; then
-    show 'Already installed. Skipping!'
-else
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc |
-        gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' > /etc/apt/sources.list.d/1password.list
-    mkdir -p /etc/debsig/policies/AC2D62742012EA22/
-    curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol > \
-        /etc/debsig/policies/AC2D62742012EA22/1password.pol
-    mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
-        --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
-    apt-get update
-    apt-get install -y 1password
-fi
-show_done
-
-show "Installing Rust and Cargo..."
 if [ -e "$USER_HOME"/.cargo/env ]; then
-    show 'Already installed. Skipping!'
+    echo "  Rust: already installed"
 else
+    echo "  Rust: installing..."
     sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
         sudo -u "$SUDO_USER" -- sh -s -- -y --no-modify-path
     path_additions+=('"$HOME"/.cargo/bin')
-    show_done
 fi
 
-show "Installing Go..."
 if [ -e /usr/local/go ]; then
-    show 'Already installed. Skipping!'
+    echo "  Go: already installed"
 else
-    #Download Latest Go
-    echo "Finding latest version of Go for AMD64... "
-    latest=$(wget -nv -O- https://go.dev/dl/)
+    echo "  Go: installing..."
+    latest=$(wget -nv -O- https://go.dev/dl/ 2>/dev/null)
     latest=$(grep -oP -m1 'go(\d+\.){3}linux-amd64\.tar\.gz' - <<< "$latest")
     if [ -z "$latest" ]; then
         echo "Error determining latest Go version!"
         exit 1
     fi
-    url=https://go.dev/dl/"$latest"
-    echo "Downloading latest Go: $latest"
-    wget --quiet --continue --show-progress "$url"
-    unset url
-
-    # Remove Old Go
+    _wget --show-progress "https://go.dev/dl/$latest"
     rm -rf /usr/local/go
-
-    # Install new Go
     tar -C /usr/local -xzf "$latest"
-    echo "Create the skeleton for your local users go directory"
-    mkdir -p "$SUDO_USER"/go/{bin,pkg,src}
-    echo "Setting up GOPATH"
+    _mkdir -p "$USER_HOME"/go/{bin,pkg,src}
     echo $'\n''export GOPATH=$HOME/go'$'\n' >> "$USER_RC"
-    echo "Setting PATH to include golang binaries"
     path_additions+=('/usr/local/go/bin' '"$GOPATH"/bin')
-
-    # Remove Download
     rm "$latest"
-
-    # Print Go Version
-    /usr/local/go/bin/go version
+    echo "  Go: $(/usr/local/go/bin/go version)"
 fi
-show_done
 
-show "Installing Bazelisk..."
 if command -v bazelisk > /dev/null; then
-    show 'Already installed. Skipping!'
+    echo "  Bazelisk: already installed"
 else
     arch=$(uname -m)
     case "$arch" in
@@ -454,111 +415,120 @@ else
         echo "Error determining latest Bazelisk version!"
         exit 1
     fi
-    url="https://github.com/bazelbuild/bazelisk/releases/download/${latest}/bazelisk-linux-${arch}"
-    echo "Downloading Bazelisk $latest for linux-$arch..."
-    wget -O /usr/local/bin/bazelisk "$url"
+    echo "  Bazelisk $latest: installing..."
+    _wget -O /usr/local/bin/bazelisk "https://github.com/bazelbuild/bazelisk/releases/download/${latest}/bazelisk-linux-${arch}"
     chmod +x /usr/local/bin/bazelisk
     ln -sf /usr/local/bin/bazelisk /usr/local/bin/bazel
 fi
-show_done
 
-show "Setting up Docker..."
-if command -v docker > /dev/null; then
-    show 'Already installed. Skipping!'
+if [ -e /etc/.nix-installed ]; then
+    echo "  Nix: already installed"
 else
-    for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
-        apt-get remove -y "$pkg"
-    done
-
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    chmod a+r /etc/apt/keyrings/docker.gpg
-
-    rm -f /etc/apt/sources.list.d/docker.list
-    echo \
-        "deb [arch=$(dpkg --print-architecture)" \
-        'signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu' \
-        "$(. /etc/os-release && echo "$VERSION_CODENAME") stable" > \
-        /etc/apt/sources.list.d/docker.list
-
-    apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    docker run hello-world
+    echo "  Nix: installing..."
+    printf 'n\ny\n' | sh <(curl -L https://nixos.org/nix/install) --daemon 2>&1 | grep -E '^\~\~>|error|warning' || true
+    echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
+    installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/nix.conf"
+    touch /etc/.nix-installed
 fi
 
+if in_wsl; then
+    echo "  Nerd Font: skipped (WSL)"
+elif [ -e "$USER_HOME/.fonts/0xProtoNerdFontMono-Regular.ttf" ]; then
+    echo "  Nerd Font: already installed"
+else
+    nerdfont_latest=$(curl -sS https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest | jq -r '.tag_name')
+    if [ -z "$nerdfont_latest" ] || [ "$nerdfont_latest" = "null" ]; then
+        echo "Error determining latest Nerd Font version!"
+        exit 1
+    fi
+    echo "  0xProto Nerd Font $nerdfont_latest: installing..."
+    _wget -O /tmp/nerdfont.zip "https://github.com/ryanoasis/nerd-fonts/releases/download/${nerdfont_latest}/0xProto.zip"
+    _mkdir -p "$USER_HOME"/.fonts
+    aunpack --extract-to "$USER_HOME"/.fonts /tmp/nerdfont.zip
+    rm /tmp/nerdfont.zip
+    rm "$USER_HOME"/.fonts/{LICENSE,README.md}
+    _chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.fonts
+    profile=$(gsettings get org.gnome.Terminal.ProfilesList default)
+    profile=${profile:1:-1} # remove leading and trailing single quotes
+    gsettings set "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$profile/" font '0xProto Nerd Font 14'
+fi
+
+# =============================================================================
+banner "Setting up Docker"
+# =============================================================================
+
+systemctl is-active --quiet docker || sleep 5
 add_user_to_group "$SUDO_USER" docker
-
-show "Sanity checking docker AS '$SUDO_USER' via docker.io..."
-
-# We are running as root but we want to try
-# running docker as the user who used sudo
-if ! su -c 'docker run hello-world' "$SUDO_USER"; then
-    show "ERROR! Docker is misconfigured. Please contact a human for help."
+echo "  Sanity check as '$SUDO_USER'..."
+if ! su -c 'docker run hello-world' "$SUDO_USER" > /dev/null 2>&1; then
+    echo "ERROR: Docker is misconfigured. Please contact a human for help."
     exit 1
 fi
-show_done
+echo "  Docker: OK"
 
-show "Allowing no password when using sudo..."
+# =============================================================================
+banner "Configuring system"
+# =============================================================================
+
+echo "  Sudoers: passwordless sudo"
 sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
-show_done
 
-show "Installing default vimrc..."
 if [ -e "/home/$SUDO_USER/.vimrc" ]; then
-    show 'Already installed. Skipping!'
+    echo "  vimrc: already installed"
 else
-    cp -v "$SCRIPT_DIR"/vimrc "$USER_HOME"/.vimrc
-    chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.vimrc
+    echo "  vimrc: installing"
+    _cp "$SCRIPT_DIR"/vimrc "$USER_HOME"/.vimrc
+    _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.vimrc
     installUser "$USER_HOME"/.vim/pack/plugins/start/cscope/plugin/ "$SCRIPT_DIR"/cscope_maps.vim
     installUser "$USER_HOME"/.vim/spell
-    show_done
 fi
 
-show "Installing default tmux conf..."
 if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
-    show 'Already installed. Skipping!'
+    echo "  tmux.conf: already installed"
 else
-    cp -v "$SCRIPT_DIR"/tmux.conf "$USER_HOME"/.tmux.conf
-    chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux.conf
-    show_done
+    echo "  tmux.conf: installing"
+    _cp "$SCRIPT_DIR"/tmux.conf "$USER_HOME"/.tmux.conf
+    _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux.conf
 fi
 
-show "Removing useless home directories..."
+echo "  Cleaning up home directories..."
 rm -rf "$USER_HOME"/{Public,Templates,Music}
-show_done
+declare -a dir_list=(
+    "$USER_HOME"/Applications
+    "$USER_HOME"/Downloads
+    "$USER_HOME"/GoogleDrive
+    "$USER_HOME"/Learn
+    "$USER_HOME"/Repos
+)
+_mkdir -p "${dir_list[@]}"
+_chown "$SUDO_USER:$SUDO_USER" -R "${dir_list[@]}"
 
-show "Adding useful home directories..."
-dir_list=$(echo -n "$USER_HOME"/{Applications,Downloads,GoogleDrive,Learn,Repos})
-mkdir -p $dir_list
-chown "$SUDO_USER:$SUDO_USER" -R $dir_list
-show_done
-
-show "Generating SSH Key pair..."
 declare -r KEY_TYPE=ed25519
 declare -r KEY_PATH=/home/$SUDO_USER/.ssh/id_$KEY_TYPE
 if [ -e "$KEY_PATH" ]; then
-    show 'Already generated. Skipping!'
+    echo "  SSH key: already generated"
 else
+    echo "  SSH key: generating $KEY_TYPE keypair"
     sudo -H -u "$SUDO_USER" ssh-keygen -t "$KEY_TYPE" -N '' -f "$KEY_PATH"
 fi
-show_done
 
-show "Updating this repo's origin remote from http to ssh..."
+echo "  Git remote: updating origin to SSH"
 (cd "$SCRIPT_DIR" && git remote set-url origin git@github.com:pdietl/dev_tools.git)
-show_done
 
 declare -r BIN_DEST=$USER_HOME/bin
-
-show "Installing user binaries into $BIN_DEST..."
-if ! [ -e "$BIN_DEST" ]; then
-    mkdir -p "$BIN_DEST"
-    cp -v -r "$SCRIPT_DIR"/bin/* "$BIN_DEST"
-    chown "$SUDO_USER:$SUDO_USER" -R "$BIN_DEST"
-    show_done
+if [ -e "$BIN_DEST" ]; then
+    echo "  User binaries: already installed"
 else
-    show "$BIN_DEST already exists. Skipping!"
+    echo "  User binaries: installing to $BIN_DEST"
+    _mkdir -p "$BIN_DEST"
+    _cp -r "$SCRIPT_DIR"/bin/* "$BIN_DEST"
+    _chown "$SUDO_USER:$SUDO_USER" -R "$BIN_DEST"
 fi
 
-if ! [ -e "$USER_HOME/.gitconfig" ]; then
+if [ -e "$USER_HOME/.gitconfig" ]; then
+    echo "  gitconfig: already installed"
+else
+    echo "  gitconfig: installing"
     echo '[user]
     name = Pete Dietl
     email = petedietl@gmail.com
@@ -567,33 +537,33 @@ if ! [ -e "$USER_HOME/.gitconfig" ]; then
     excludesfile = ~/.gitignore_global
 [init]
     defaultBranch = main' > "$USER_HOME/.gitconfig"
-    chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
-    cp -v "$SCRIPT_DIR"/gitignore_global "$USER_HOME"/.gitignore_global
-    chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.gitignore_global
+    _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
+    _cp "$SCRIPT_DIR"/gitignore_global "$USER_HOME"/.gitignore_global
+    _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.gitignore_global
 fi
 
 add_user_to_group "$SUDO_USER" dialout
 add_user_to_group "$SUDO_USER" plugdev
+# Reconfigure wireshark-common to ensure the 'wireshark' group exists
+# (needed if it was previously installed without the preseed)
+dpkg-reconfigure wireshark-common
+add_user_to_group "$SUDO_USER" wireshark
 
 gsettings_set() {
     local schema=$1
     local key=$2
     local value=$3
-
     sudo -H -u "$SUDO_USER" \
         DISPLAY=:0 \
         DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$(id -u "$SUDO_USER")"/bus \
         gsettings set "$schema" "$key" "$value"
 }
 
-show "Set GNOME settings..."
 if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
+    echo "  GNOME: skipped (WSL)"
 elif command -v gsettings > /dev/null; then
-    show "Setting GNOME to use 12-hr time..."
+    echo "  GNOME: configuring settings"
     gsettings_set org.gnome.desktop.interface clock-format 12h
-    show_done
-    show "Setting GNOME desktop favorite apps..."
     favorite_apps="[
         'brave-browser.desktop',
         'org.gnome.Nautilus.desktop',
@@ -602,68 +572,37 @@ elif command -v gsettings > /dev/null; then
         'slack_slack.desktop'
     ]"
     gsettings_set org.gnome.shell favorite-apps "$favorite_apps"
-    show_done
-    show "Setting GNOME tweak to interpret two finger click as right click..."
     gsettings_set org.gnome.desktop.peripherals.touchpad click-method fingers
 else
-    show "GNOME shell not present. Skipping!"
+    echo "  GNOME: not present, skipping"
 fi
-show_done
 
-show "Installing udev rules..."
-cp -v "$SCRIPT_DIR"/udev_rules/* /etc/udev/rules.d/
+echo "  udev rules: installing"
+_cp "$SCRIPT_DIR"/udev_rules/* /etc/udev/rules.d/
 udevadm control --reload
-show_done
 
-show "Installing gdbinit..."
-cp -v "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
-chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.gdbinit
-show_done
+echo "  gdbinit: installing"
+_cp "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
+_chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.gdbinit
 
-show "Installing Nix..."
-if [ -e /etc/.nix-installed ]; then
-    show 'Already installed. Skipping!'
-else
-    sh <(curl -L https://nixos.org/nix/install) --daemon --yes
-    echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
-    installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/nix.conf"
-    touch /etc/.nix-installed
-fi
-show_done
+# =============================================================================
+banner "Finalizing"
+# =============================================================================
 
-show "Installing 0xProto Nerd Font"
-if in_wsl; then
-    show 'This is a WSL machine. Skipping!'
-elif ! [ -e "$USER_HOME/.fonts/0xProtoNerdFontMono-Regular.ttf" ]; then
-    wget -O /tmp/nerdfont.zip https://github.com/ryanoasis/nerd-fonts/releases/download/v3.3.0/0xProto.zip
-    mkdir -p "$USER_HOME"/.fonts
-    aunpack --extract-to "$USER_HOME"/.fonts /tmp/nerdfont.zip
-    rm /tmp/nerdfont.zip
-    rm "$USER_HOME"/.fonts/{LICENSE,README.md}
-    chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.fonts
-    profile=$(gsettings get org.gnome.Terminal.ProfilesList default)
-    profile=${profile:1:-1} # remove leading and trailing single quotes
-    gsettings set "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$profile/" font '0xProto Nerd Font 14'
-else
-    show 'Already installed. Skipping!'
-fi
+echo "  Cleaning up unused packages..."
+_apt_get autoremove -y
 
-show "Cleaning up via autoremove..."
-apt-get autoremove -y
-show_done
-
-show "Setting bashrc and profile paths and prompts..."
 declare -r PATH_SETTINGS_BANNER='# PATH Additions'
 if [ -e "$USER_RC" ] && grep -q -F "$PATH_SETTINGS_BANNER" "$USER_RC"; then
-    show 'Already installed. Skipping!'
+    echo "  Shell paths/prompt: already configured"
 else
+    echo "  Shell paths/prompt: configuring"
     cat "$SCRIPT_DIR"/dedup_paths.sh >> "$USER_RC"
     (
         echo "$PATH_SETTINGS_BANNER"
         for addition in "${path_additions[@]}"; do
             echo "prepend_path $addition"
         done
-
         echo
         echo 'dedup_paths'
         echo
@@ -672,7 +611,9 @@ else
         echo 'eval "$(direnv hook bash)"'
         echo 'eval "$(starship init bash)"'
     ) >> "$USER_RC"
-    chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.bashrc
+    _chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.bashrc
     installUser "$USER_HOME"/.config "$SCRIPT_DIR"/starship.toml
-    show_done
 fi
+
+echo
+echo "Done!"
