@@ -180,7 +180,6 @@ declare -a packages=(
     curl
     ddd
     device-tree-compiler
-    direnv
     dkms
     docker-buildx-plugin
     docker-ce
@@ -290,6 +289,26 @@ for f in "${deb_files[@]+"${deb_files[@]}"}"; do rm -f "$f"; done
 # =============================================================================
 banner "Installing additional tools"
 # =============================================================================
+
+if command -v direnv > /dev/null; then
+    echo "  direnv: already installed"
+else
+    echo "  direnv: installing..."
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)  arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        *) echo "Unsupported architecture: $arch"; exit 1 ;;
+    esac
+    latest=$(curl -sS https://api.github.com/repos/direnv/direnv/releases/latest | jq -r '.tag_name')
+    if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+        echo "Error determining latest direnv version!"
+        exit 1
+    fi
+    curl -sSL -o /usr/local/bin/direnv \
+        "https://github.com/direnv/direnv/releases/download/${latest}/direnv.linux-${arch}"
+    chmod +x /usr/local/bin/direnv
+fi
 
 if command -v starship > /dev/null; then
     echo "  Starship: already installed"
