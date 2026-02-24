@@ -1,12 +1,20 @@
 return {
   -- Ada language server (no LazyVim extra exists for Ada).
-  -- Adding "als" to the servers table causes mason-lspconfig to auto-install
+  -- Adding "ada_ls" to the servers table causes mason-lspconfig to auto-install
   -- ada-language-server via Mason.
   {
     "neovim/nvim-lspconfig",
     opts = {
       servers = {
-        als = {},
+        ada_ls = {
+          root_dir = function(bufnr, on_dir)
+            local fname = vim.api.nvim_buf_get_name(bufnr)
+            local root = vim.fs.root(fname, { ".als.json", "alire.toml" })
+            if root then
+              on_dir(root)
+            end
+          end,
+        },
         asm_lsp = {},
       },
     },
@@ -18,6 +26,23 @@ return {
     opts = {
       ensure_installed = {
         "shellcheck",
+      },
+    },
+  },
+
+  -- Use gnatpp (from libadalang-tools) for Ada formatting instead of LSP.
+  {
+    "stevearc/conform.nvim",
+    opts = {
+      formatters_by_ft = {
+        ada = { "gnatpp" },
+      },
+      formatters = {
+        gnatpp = {
+          command = "gnatpp",
+          args = { "--syntax-only", "$FILENAME" },
+          stdin = false,
+        },
       },
     },
   },
