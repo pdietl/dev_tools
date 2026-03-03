@@ -21,12 +21,12 @@ declare -a path_additions=('"$HOME"/bin' '"$HOME"/.local/bin')
 # ---------------------------------------------------------------------------
 # Command wrappers -- tweak common flags (e.g. verbosity) in one place
 # ---------------------------------------------------------------------------
-_wget()     { wget -q "$@"; }
-_cp()       { cp -v "$@"; }
-_mkdir()    { mkdir -v "$@"; }
-_chown()    { chown "$@"; }
-_install()  { install -v "$@"; }
-_apt_get()  { apt-get -qq "$@"; }
+_wget() { wget -q "$@"; }
+_cp() { cp -v "$@"; }
+_mkdir() { mkdir -v "$@"; }
+_chown() { chown "$@"; }
+_install() { install -v "$@"; }
+_apt_get() { apt-get -qq "$@"; }
 
 installUser() {
     local dest_dir
@@ -93,7 +93,7 @@ banner "Preparing apt sources"
 
 declare -a docker_conflicts=()
 for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
-    if dpkg-query -Wf'${db:Status-abbrev}' "$pkg" 2>/dev/null | grep -q '^i'; then
+    if dpkg-query -Wf'${db:Status-abbrev}' "$pkg" 2> /dev/null | grep -q '^i'; then
         docker_conflicts+=("$pkg")
     fi
 done
@@ -106,14 +106,14 @@ fi
 
 if ! in_wsl; then
     echo "  Adding Signal apt source..."
-    wget -qO- https://updates.signal.org/desktop/apt/keys.asc \
-        | gpg --batch --yes --dearmor -o /usr/share/keyrings/signal-desktop-keyring.gpg
+    wget -qO- https://updates.signal.org/desktop/apt/keys.asc |
+        gpg --batch --yes --dearmor -o /usr/share/keyrings/signal-desktop-keyring.gpg
     echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main' \
         > /etc/apt/sources.list.d/signal-xenial.list
 
     echo "  Adding 1Password apt source..."
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
-        | gpg --batch --yes --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
+    curl -sS https://downloads.1password.com/linux/keys/1password.asc |
+        gpg --batch --yes --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
     echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' \
         > /etc/apt/sources.list.d/1password.list
     _mkdir -p /etc/debsig/policies/AC2D62742012EA22/
@@ -126,8 +126,8 @@ fi
 
 echo "  Adding Docker apt source..."
 _install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg |
+    gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
 rm -f /etc/apt/sources.list.d/docker.list
 echo \
@@ -175,6 +175,7 @@ declare -a packages=(
     clangd
     cmake
     containerd.io
+    cpio
     cppcheck
     cscope
     curl
@@ -187,6 +188,7 @@ declare -a packages=(
     docker-compose-plugin
     dos2unix
     dpkg-dev
+    dwarves
     efibootmgr
     exuberant-ctags
     fd-find
@@ -210,6 +212,7 @@ declare -a packages=(
     jq
     jsonlint
     lbzip2
+    libelf-dev
     libssl-dev
     libvirt-clients
     libvirt-dev
@@ -241,6 +244,7 @@ declare -a packages=(
     qemu-system
     qemu-system-x86
     qemu-user-static
+    qemu-utils
     remake
     ripgrep
     rlwrap
@@ -266,8 +270,8 @@ declare -a packages=(
     uuid-dev
     valgrind
     vim
-    vite
     virtualenv
+    vite
     whois
     wireguard
     wireguard-tools
@@ -296,9 +300,12 @@ else
     echo "  direnv: installing..."
     arch=$(uname -m)
     case "$arch" in
-        x86_64)  arch="amd64" ;;
-        aarch64) arch="arm64" ;;
-        *) echo "Unsupported architecture: $arch"; exit 1 ;;
+    x86_64) arch="amd64" ;;
+    aarch64) arch="arm64" ;;
+    *)
+        echo "Unsupported architecture: $arch"
+        exit 1
+        ;;
     esac
     latest=$(curl -sS https://api.github.com/repos/direnv/direnv/releases/latest | jq -r '.tag_name')
     if [ -z "$latest" ] || [ "$latest" = "null" ]; then
@@ -337,7 +344,7 @@ fi
 
 if in_wsl; then
     echo "  Saleae Logic2: skipped (WSL)"
-elif dpkg-query -Wf'${db:Status-abbrev}' saleae-logic2 2>/dev/null | grep -q '^i'; then
+elif dpkg-query -Wf'${db:Status-abbrev}' saleae-logic2 2> /dev/null | grep -q '^i'; then
     echo "  Saleae Logic2: already installed"
 else
     echo "  Saleae Logic2: installing..."
@@ -345,7 +352,7 @@ else
     git clone https://github.com/pdietl/saleae-logic2-appimage-to-deb.git "$tmp"
     pushd "$tmp" > /dev/null
     ./build-logic2-deb.sh
-    deb_file=$(ls -1 "$tmp"/saleae-logic2_*.deb 2>/dev/null | head -1)
+    deb_file=$(ls -1 "$tmp"/saleae-logic2_*.deb 2> /dev/null | head -1)
     if [ -n "$deb_file" ]; then
         _apt_get install -y "$deb_file"
         rm "$deb_file"
@@ -410,7 +417,7 @@ if [ -e /usr/local/go ]; then
     echo "  Go: already installed"
 else
     echo "  Go: installing..."
-    latest=$(wget -nv -O- https://go.dev/dl/ 2>/dev/null)
+    latest=$(wget -nv -O- https://go.dev/dl/ 2> /dev/null)
     latest=$(grep -oP -m1 'go(\d+\.){3}linux-amd64\.tar\.gz' - <<< "$latest")
     if [ -z "$latest" ]; then
         echo "Error determining latest Go version!"
@@ -431,9 +438,12 @@ if command -v bazelisk > /dev/null; then
 else
     arch=$(uname -m)
     case "$arch" in
-        x86_64) arch="amd64" ;;
-        aarch64) arch="arm64" ;;
-        *) echo "Unsupported architecture: $arch"; exit 1 ;;
+    x86_64) arch="amd64" ;;
+    aarch64) arch="arm64" ;;
+    *)
+        echo "Unsupported architecture: $arch"
+        exit 1
+        ;;
     esac
     latest=$(curl -sS https://api.github.com/repos/bazelbuild/bazelisk/releases/latest | jq -r '.tag_name')
     if [ -z "$latest" ] || [ "$latest" = "null" ]; then
