@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Quick network summary: condensed ip link + ip addr + ip route
+
+set -euo pipefail
+
+bold='\033[1m'
+reset='\033[0m'
+
+echo -e "${bold}── Interfaces ──${reset}"
+
+# Parse link-level info (flags, mtu, mac) from ip -o link
+# Then append IPv4 addresses from ip -o addr
+awk '
+BEGIN {
+    while (("ip -o link show" | getline line) > 0) {
+        # idx: name: <FLAGS> mtu NNN ... link/type MAC ...
+        split(line, f, " ")
+        idx = f[1]
+        sub(/:$/, "", idx)
+        name = f[2]
+        sub(/:$/, "", name)
+
+        # Flags
+        flags = ""
+        if (match(line, /<[^>]+>/)) {
+            flags = substr(line, RSTART+1, RLENGTH-2)
+        }
+
+        mcast = (flags ~ /MULTICAST/) ? "MCAST" : "no-mcast"
+        upper = (flags ~ /(^|,)UP(,|$)/) ? "UP" : "DOWN"
+        lower = (flags ~ /LOWER_UP/) ? "LOWER_UP" : "LOWER_DOWN"
+
+        mtu = "?"
+        if (match(line, /mtu [0-9]+/)) {
+            mtu = substr(line, RSTART+4, RLENGTH-4)
+        }
+
+        mac = "-"
+        if (match(line, /link\/ether [0-9a-f:]+/)) {
+            s = substr(line, RSTART, RLENGTH)
+            split(s, mp, " ")
+            mac = mp[2]
+        }
+
+        order[++n] = idx
+        names[idx]  = name
+        mcasts[idx] = mcast
+        uppers[idx] = upper
+        lowers[idx] = lower
+        mtus[idx]   = mtu
+        macs[idx]   = mac
+        addrs[idx]  = ""
+    }
+
+    # Collect IPv4 addresses
+    while (("ip -o addr show" | getline line) > 0) {
+        if (line !~ /inet /) continue
+        if (line ~ /inet6 /) continue
+        split(line, f, " ")
+        idx = f[1]
+        sub(/:$/, "", idx)
+
+        # Extract "inet x.x.x.x/N brd x.x.x.x" or just "inet x.x.x.x/N"
+        addr_info = ""
+        if (match(line, /inet [0-9./]+ brd [0-9./]+/)) {
+            addr_info = substr(line, RSTART, RLENGTH)
+        } else if (match(line, /inet [0-9./]+/)) {
+            addr_info = substr(line, RSTART, RLENGTH)
+        }
+
+        if (addr_info != "") {
+            if (addrs[idx] != "") addrs[idx] = addrs[idx] "\n"
+            addrs[idx] = addrs[idx] addr_info
+        }
+    }
+
+    for (i = 1; i <= n; i++) {
+        idx = order[i]
+        printf "%s: %-16s  %-8s  upper=%-4s  lower=%-10s  mtu=%-5s  mac=%s\n", \
+            idx, names[idx], mcasts[idx], uppers[idx], lowers[idx], mtus[idx], macs[idx]
+        if (addrs[idx] != "") {
+            split(addrs[idx], alines, "\n")
+            for (j = 1; j <= length(alines); j++) {
+                printf "      %s\n", alines[j]
+            }
+        }
+    }
+}
+' /dev/null
+
+echo
+echo -e "${bold}── Routes ──${reset}"
+ip route
