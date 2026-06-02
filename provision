@@ -70,8 +70,10 @@ if [ -z "${SUDO_USER:-}" ]; then
     exit 1
 fi
 
-if ! grep -q 'ubuntu' /etc/os-release; then
-    echo "Error: this script only supports Ubuntu" >&2
+# shellcheck disable=SC1091
+. /etc/os-release
+if [ "${ID:-}" != "ubuntu" ] || [ "${VERSION_ID:-}" != "26.04" ]; then
+    echo "Error: this script only supports Ubuntu 26.04 (detected: ${PRETTY_NAME:-unknown})" >&2
     exit 1
 fi
 
@@ -104,26 +106,6 @@ else
     echo "  No conflicting Docker packages found"
 fi
 
-if ! in_wsl; then
-    echo "  Adding Signal apt source..."
-    wget -qO- https://updates.signal.org/desktop/apt/keys.asc |
-        gpg --batch --yes --dearmor -o /usr/share/keyrings/signal-desktop-keyring.gpg
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main' \
-        > /etc/apt/sources.list.d/signal-xenial.list
-
-    echo "  Adding 1Password apt source..."
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc |
-        gpg --batch --yes --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' \
-        > /etc/apt/sources.list.d/1password.list
-    _mkdir -p /etc/debsig/policies/AC2D62742012EA22/
-    curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol \
-        > /etc/debsig/policies/AC2D62742012EA22/1password.pol
-    _mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
-    curl -sS https://downloads.1password.com/linux/keys/1password.asc \
-        --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
-fi
-
 echo "  Adding Docker apt source..."
 _install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg |
@@ -138,13 +120,6 @@ echo \
 
 echo "  Adding google-drive-ocamlfuse PPA..."
 add-apt-repository --no-update -y ppa:alessandro-strada/ppa > /dev/null 2>&1
-
-declare -a deb_files=()
-if ! in_wsl && ! command -v discord > /dev/null; then
-    echo "  Downloading Discord .deb..."
-    _wget -O /tmp/discord.deb 'https://discordapp.com/api/download?platform=linux&format=deb'
-    deb_files+=(/tmp/discord.deb)
-fi
 
 # =============================================================================
 banner "Installing packages"
@@ -243,7 +218,8 @@ declare -a packages=(
     python3-venv
     qemu-system
     qemu-system-x86
-    qemu-user-static
+    qemu-user
+    qemu-user-binfmt
     qemu-utils
     remake
     ripgrep
@@ -283,12 +259,7 @@ declare -a packages=(
     zstd
 )
 
-if ! in_wsl; then
-    packages+=(signal-desktop 1password)
-fi
-
-_apt_get install -y "${packages[@]}" ${deb_files[@]+"${deb_files[@]}"}
-for f in "${deb_files[@]+"${deb_files[@]}"}"; do rm -f "$f"; done
+_apt_get install -y "${packages[@]}"
 
 # =============================================================================
 banner "Installing additional tools"
@@ -325,12 +296,25 @@ else
 fi
 
 if in_wsl; then
-    echo "  Brave: skipped (WSL)"
-elif command -v brave-browser > /dev/null; then
-    echo "  Brave: already installed"
+    echo "  Google Chrome: skipped (WSL)"
+elif command -v google-chrome-stable > /dev/null; then
+    echo "  Google Chrome: already installed"
 else
-    echo "  Brave: installing..."
-    curl -fsS https://dl.brave.com/install.sh | sh
+    echo "  Google Chrome: installing..."
+    _wget -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    _apt_get install -y /tmp/google-chrome.deb
+    rm /tmp/google-chrome.deb
+fi
+
+if in_wsl; then
+    echo "  1Password: skipped (WSL)"
+elif command -v 1password > /dev/null; then
+    echo "  1Password: already installed"
+else
+    echo "  1Password: installing..."
+    _wget -O /tmp/1password.deb https://downloads.1password.com/linux/debian/amd64/stable/1password-latest.deb
+    _apt_get install -y /tmp/1password.deb
+    rm /tmp/1password.deb
 fi
 
 if in_wsl; then
@@ -339,7 +323,16 @@ elif command -v slack > /dev/null; then
     echo "  Slack: already installed"
 else
     echo "  Slack: installing..."
-    snap install slack
+    slack_page=$(curl -fsS https://slack.com/release-notes/linux) || true
+    slack_ver=$(grep -oP 'Slack \K[0-9]+\.[0-9]+\.[0-9]+' <<< "$slack_page" | head -1) || true
+    if [ -z "$slack_ver" ]; then
+        echo "Error determining latest Slack version!"
+        exit 1
+    fi
+    echo "  Slack: latest is $slack_ver"
+    _wget -O /tmp/slack.deb "https://downloads.slack-edge.com/desktop-releases/linux/x64/${slack_ver}/slack-desktop-${slack_ver}-amd64.deb"
+    _apt_get install -y /tmp/slack.deb
+    rm /tmp/slack.deb
 fi
 
 if in_wsl; then
@@ -410,8 +403,9 @@ else
     echo "  Rust: installing..."
     sudo -u "$SUDO_USER" -- curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
         sudo -u "$SUDO_USER" -- sh -s -- -y --no-modify-path
-    path_additions+=('"$HOME"/.cargo/bin')
 fi
+# Always ensure the cargo/rustup bin dir is on PATH, even if Rust was already installed
+path_additions+=('"$HOME"/.cargo/bin')
 
 if [ -e /usr/local/go ]; then
     echo "  Go: already installed"
@@ -427,11 +421,11 @@ else
     rm -rf /usr/local/go
     tar -C /usr/local -xzf "$latest"
     _mkdir -p "$USER_HOME"/go/{bin,pkg,src}
-    echo $'\n''export GOPATH=$HOME/go'$'\n' >> "$USER_RC"
-    path_additions+=('/usr/local/go/bin' '"$GOPATH"/bin')
     rm "$latest"
     echo "  Go: $(/usr/local/go/bin/go version)"
 fi
+# Always ensure the Go bin dirs are on PATH, even if Go was already installed
+path_additions+=('/usr/local/go/bin' '"$GOPATH"/bin')
 
 if command -v bazelisk > /dev/null; then
     echo "  Bazelisk: already installed"
@@ -483,9 +477,6 @@ else
     rm /tmp/nerdfont.zip
     rm "$USER_HOME"/.fonts/{LICENSE,README.md}
     _chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.fonts
-    profile=$(gsettings get org.gnome.Terminal.ProfilesList default)
-    profile=${profile:1:-1} # remove leading and trailing single quotes
-    gsettings set "org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$profile/" font '0xProto Nerd Font 14'
 fi
 
 # =============================================================================
@@ -600,14 +591,17 @@ elif command -v gsettings > /dev/null; then
     echo "  GNOME: configuring settings"
     gsettings_set org.gnome.desktop.interface clock-format 12h
     favorite_apps="[
-        'brave-browser.desktop',
+        'google-chrome.desktop',
         'org.gnome.Nautilus.desktop',
-        'signal-desktop.desktop',
-        'discord.desktop',
-        'slack_slack.desktop'
+        'slack.desktop'
     ]"
     gsettings_set org.gnome.shell favorite-apps "$favorite_apps"
     gsettings_set org.gnome.desktop.peripherals.touchpad click-method fingers
+    # Ubuntu 26.04 replaced GNOME Terminal with Ptyxis; font is a global Ptyxis setting
+    if gsettings list-schemas 2> /dev/null | grep -qx org.gnome.Ptyxis; then
+        gsettings_set org.gnome.Ptyxis use-system-font false
+        gsettings_set org.gnome.Ptyxis font-name '0xProto Nerd Font 14'
+    fi
 else
     echo "  GNOME: not present, skipping"
 fi
@@ -635,6 +629,8 @@ else
     cat "$SCRIPT_DIR"/dedup_paths.sh >> "$USER_RC"
     (
         echo "$PATH_SETTINGS_BANNER"
+        echo 'export GOPATH=$HOME/go'
+        echo
         for addition in "${path_additions[@]}"; do
             echo "prepend_path $addition"
         done
