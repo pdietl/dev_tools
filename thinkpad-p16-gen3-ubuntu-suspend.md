@@ -36,10 +36,12 @@ SKU doesn't appear to expose one.
 
 ---
 
-## Three distinct failure modes
+## Four distinct failure modes
 
 Two are cosmetic; one is the catastrophic "screen is on but no GUI ever
-appears, must hard-reboot" symptom.
+appears, must hard-reboot" symptom; the fourth (added 2026-06-24) is a hung
+FUSE mount that blocks the process freezer and aborts suspend entirely —
+unrelated to graphics.
 
 ### 1. igc `IGC_PTM_STAT register` timeout spam on resume — cosmetic
 
@@ -100,6 +102,30 @@ from the iGPU's clock subsystem. Observed both on suspend *entry* (PHY
 broken before sleep) and on resume. When fatal, triggers a kernel WARNING
 in `intel_disable_transcoder+0x356` originating from `vt_ioctl` →
 `do_unblank_screen` (e.g. systemd-logind asking fbcon to unblank on lid-open).
+
+### 4. Hung Google Drive FUSE `statfs` blocks the freezer — *the actual cause of the 2026-06-24 storm*
+
+Distinct from 1–3 — **not** display or NVIDIA. Symptom in `journalctl -b`:
+```
+kernel: Freezing user space processes failed after 20.00 seconds
+  (2 tasks refusing to freeze, wq_busy=0):
+kernel: task:pool-NN  state:D  ...  fuse_statfs -> request_wait_answer
+systemd-sleep: Failed to put system to sleep. System resumed again: Device or resource busy
+```
+The tell is **2 tasks** (vs mode 2's *1 task*) and the `fuse_statfs` stack. On
+2026-06-24 this fired ~97 times over ~30 min (194 freeze-fail lines) and
+amplified ~250 pipewire/v4l2 re-probe errors. `EnableS0ixPowerManagement=1`
+(mode 2's fix) was confirmed live, so this was a *separate* cause.
+
+`~/mnt/GoogleDrive` is a `google-drive-ocamlfuse` mount. Its `statfs` handler
+routed through `get_metadata`, which does a **blocking, retrying network
+round-trip** (Drive `about` quota + changes feed) whenever its 60 s metadata
+cache is stale. `statfs(2)` is called implicitly by GNOME's disk-usage poll,
+`df`, GTK file choosers, some PAM stacks — so when Drive/the network stalls the
+caller blocks in uninterruptible **D** state inside
+`fuse_statfs`/`request_wait_answer`. D-state tasks cannot be frozen → the
+freezer times out → suspend aborts and retries forever. (Upstream
+google-drive-ocamlfuse issue #896.)
 
 ---
 
@@ -209,6 +235,34 @@ Three i915 knobs targeting problem (3), in the order they were added:
 
 Power cost: probably 1–2 W extra at idle, total. Insignificant relative
 to a hard reboot.
+
+### `google-drive-ocamlfuse` — patched non-blocking `statfs` (fixes mode 4)
+
+The packaged `google-drive-ocamlfuse` deb is **removed**; a patched build from
+`~/Repos/google-drive-ocamlfuse` is installed at
+`/usr/local/bin/google-drive-ocamlfuse`, and the user unit
+`~/.config/systemd/user/google-drive-ocamlfuse.service` `ExecStart` points there.
+
+Patch (3 files — `src/drive.ml`, `src/driveMetadataRefresh.ml`, `.mli`): `statfs`
+now reads the **in-memory cached** metadata through a new non-blocking
+`get_cached_metadata` (no network, no metadata lock; "unlimited" default until
+the cache is first populated). It can therefore never block, so it can never
+wedge the freezer. Trade-off: `df` may show slightly stale quota — strictly
+better than hanging. Verified: 30 `statfs` calls add **zero** metadata-refresh
+log lines (`-verbose`).
+
+Build (the OCaml toolchain was absent): `apt install opam libfuse3-dev
+libsqlite3-dev libgmp-dev libcurl4-openssl-dev`, `opam switch create gdfuse
+ocaml-system` (system OCaml 5.4.0), `opam install --deps-only .`, `dune build
+--profile release bin/gdfuse.exe`, `sudo install -m755
+_build/default/bin/gdfuse.exe /usr/local/bin/google-drive-ocamlfuse`. The binary
+dynamically links system libs (fuse3/sqlite3/gmp/curl) so it runs without the
+opam switch; the `gdfuse` switch is needed only to **rebuild** (after a `git
+pull`, or to regenerate the patch). The working-tree patch is uncommitted — its
+durable home is an upstream PR against astrada/google-drive-ocamlfuse #896.
+
+Revert: `sudo apt install google-drive-ocamlfuse` and point `ExecStart` back at
+`/usr/bin/google-drive-ocamlfuse`.
 
 ### Already present in baseline (do NOT touch)
 
@@ -399,3 +453,11 @@ measured (it's the latest change as of this writing).
   the existing mitigations. One occurrence was fatal (forced reboot after
   ~30 s of dark screen). Added `i915.disable_power_well=0`; effectiveness
   pending observation across more multi-day boots.
+- **2026-06-24** — the suspend storm returned (97 failed suspends / ~30 min) but
+  the logs showed a *new* cause: 2 `pool-*` threads stuck in `fuse_statfs` on the
+  `google-drive-ocamlfuse` mount (S0ix=1 was live, so not mode 2). Root-caused to
+  the driver's blocking `statfs`→metadata-refresh path (upstream #896); patched
+  `statfs` to be non-blocking, built + installed to `/usr/local/bin`, removed the
+  deb. See failure mode 4 and its mitigation above. (Same session: redirected
+  tailscaled+Slack journal spam, fixed geoclue/cups-browsed apparmor denials,
+  disabled the nvidia-powerd SEGV crash-loop, masked orphaned PCP services.)
