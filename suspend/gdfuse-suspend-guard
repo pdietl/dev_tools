@@ -1,0 +1,117 @@
+#!/bin/bash
+set -u
+
+# Suspend guard for google-drive-ocamlfuse mounts.
+#
+# gdfuse serves FUSE requests with blocking network I/O and retries without
+# bound. If the network dies while a request is in flight (e.g. unplugging
+# ethernet right before the machine sleeps), the calling task waits in
+# uninterruptible D-state inside the kernel's FUSE layer. D-state tasks
+# cannot be frozen, so every suspend attempt fails after the 20 s freezer
+# timeout and the machine wedges awake until hard power-off. Journal
+# signature: "Freezing user space processes failed after 20.0 seconds
+# (N tasks refusing to freeze)" with fuse_statfs or fuse_do_getattr in the
+# stack trace.
+#
+# Before sleep: if a gdfuse FUSE connection still has unanswered requests
+# after a short drain period, abort the connection. All waiters wake
+# immediately with an I/O error and become freezable. After resume: lazily
+# unmount the dead mountpoint and restart the owning user's
+# google-drive-ocamlfuse.service so the mount comes straight back.
+#
+# Cost: a request aborted mid-flight surfaces as one EIO to the caller.
+# Revert: delete this file.
+
+declare -r LOG_TAG='gdfuse-suspend-guard'
+declare -r STATE_FILE='/run/gdfuse-suspend-guard.aborted'
+declare -r DRAIN_SECS=2
+
+log() {
+    logger -t "$LOG_TAG" "$1"
+}
+
+# One line per gdfuse mount: "<fuse connection id> <owner uid> <mountpoint>"
+gdfuse_mounts() {
+    awk '{
+        fstype = ""
+        for (i = 7; i < NF; i++) {
+            if ($i == "-") {
+                fstype = $(i + 1)
+                break
+            }
+        }
+        if (fstype != "fuse.google-drive-ocamlfuse") {
+            next
+        }
+        split($3, dev, ":")
+        uid = 0
+        n = split($NF, opts, ",")
+        for (j = 1; j <= n; j++) {
+            if (opts[j] ~ /^user_id=/) {
+                uid = substr(opts[j], 9)
+            }
+        }
+        print dev[2], uid, $5
+    }' /proc/self/mountinfo
+}
+
+waiting_count() {
+    cat "/sys/fs/fuse/connections/$1/waiting" 2> /dev/null || echo 0
+}
+
+pre_sleep() {
+    rm -f "$STATE_FILE"
+    local -a mounts=()
+    mapfile -t mounts < <(gdfuse_mounts)
+    ((${#mounts[@]} == 0)) && return 0
+
+    local deadline=$((SECONDS + DRAIN_SECS)) busy conn uid mnt entry
+    while :; do
+        busy=0
+        for entry in "${mounts[@]}"; do
+            read -r conn uid mnt <<< "$entry"
+            (($(waiting_count "$conn") > 0)) && busy=1
+        done
+        ((busy == 0)) && return 0
+        ((SECONDS >= deadline)) && break
+        sleep 0.5
+    done
+
+    local waiting
+    for entry in "${mounts[@]}"; do
+        read -r conn uid mnt <<< "$entry"
+        waiting=$(waiting_count "$conn")
+        ((waiting == 0)) && continue
+        if echo 1 > "/sys/fs/fuse/connections/$conn/abort" 2> /dev/null; then
+            log "aborted FUSE connection $conn for $mnt ($waiting unanswered requests after ${DRAIN_SECS}s) so tasks can freeze"
+            echo "$uid $mnt" >> "$STATE_FILE"
+        else
+            log "WARN: failed to abort FUSE connection $conn for $mnt"
+        fi
+    done
+}
+
+post_sleep() {
+    [[ -e $STATE_FILE ]] || return 0
+    local uid mnt user
+    while read -r uid mnt; do
+        fusermount3 -uz "$mnt" 2> /dev/null || umount -l "$mnt" 2> /dev/null
+        user=$(getent passwd "$uid" | cut -d: -f1)
+        if [[ -n $user ]] &&
+            systemctl --user --machine="$user@.host" restart google-drive-ocamlfuse.service 2> /dev/null; then
+            log "remounted $mnt (restarted google-drive-ocamlfuse.service for $user)"
+        else
+            log "WARN: could not restart google-drive-ocamlfuse.service for uid $uid; its Restart=always will remount $mnt within ~60s"
+        fi
+    done < "$STATE_FILE"
+    rm -f "$STATE_FILE"
+}
+
+case "$1" in
+pre)
+    pre_sleep
+    ;;
+post)
+    post_sleep
+    ;;
+esac
