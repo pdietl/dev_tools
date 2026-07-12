@@ -1,0 +1,14 @@
+# Size-capped rotation for the LocalSearch log (see the user-unit drop-in
+# ~/.config/systemd/user/localsearch-3.service.d/suppress-journal-spam.conf).
+# Template: provision substitutes @USER@/@USER_HOME@ and installs as
+# /etc/logrotate.d/localsearch. su because the file is user-owned;
+# copytruncate because the service keeps the fd open.
+@USER_HOME@/.local/state/localsearch/localsearch.log {
+    su @USER@ @USER@
+    size 10M
+    rotate 3
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

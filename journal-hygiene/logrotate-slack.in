@@ -1,0 +1,13 @@
+# Size-capped rotation for Slack's log (written by ~/.local/bin/slack-logged).
+# Template: provision substitutes @USER@/@USER_HOME@ and installs as
+# /etc/logrotate.d/slack. su because the file is user-owned; copytruncate
+# because Slack keeps the fd open.
+@USER_HOME@/.local/state/slack/slack.log {
+    su @USER@ @USER@
+    size 10M
+    rotate 3
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

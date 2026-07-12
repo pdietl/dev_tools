@@ -649,6 +649,76 @@ else
 fi
 
 # =============================================================================
+banner "Journal hygiene"
+# =============================================================================
+
+# Route the chattiest desktop loggers into their own size-capped log files
+# so `journalctl` stays readable; sources live in journal-hygiene/.
+if in_wsl; then
+    echo "  Journal hygiene: skipped (WSL)"
+else
+    echo "  journald: 20G persistent cap + flood backstop"
+    _install -m 0644 -D "$SCRIPT_DIR"/journal-hygiene/99-journal-hygiene.conf \
+        /etc/systemd/journald.conf.d/99-journal-hygiene.conf
+    systemctl restart systemd-journald
+
+    echo "  logrotate: hourly timer override (size caps bite within ~1h)"
+    _install -m 0644 -D "$SCRIPT_DIR"/journal-hygiene/logrotate-frequency.conf \
+        /etc/systemd/system/logrotate.timer.d/frequency.conf
+    systemctl daemon-reload
+
+    if systemctl cat tailscaled.service > /dev/null 2>&1; then
+        echo "  tailscaled -> /var/log/tailscaled.log"
+        _install -m 0644 -D "$SCRIPT_DIR"/journal-hygiene/tailscaled-suppress-journal-spam.conf \
+            /etc/systemd/system/tailscaled.service.d/suppress-journal-spam.conf
+        _install -m 0644 "$SCRIPT_DIR"/journal-hygiene/logrotate-tailscaled \
+            /etc/logrotate.d/tailscaled
+        systemctl daemon-reload
+        systemctl try-restart tailscaled.service
+    else
+        echo "  tailscaled: not installed, skipping"
+    fi
+
+    if command -v slack > /dev/null; then
+        echo "  Slack -> ~/.local/state/slack/slack.log (on next Slack launch)"
+        installUser "$USER_HOME"/.local/bin "$SCRIPT_DIR"/journal-hygiene/slack-logged
+        installUser "$USER_HOME"/.local/share/applications
+        sed "s|^Exec=/usr/bin/slack|Exec=$USER_HOME/.local/bin/slack-logged|" \
+            /usr/share/applications/slack.desktop \
+            > "$USER_HOME"/.local/share/applications/slack.desktop
+        _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.local/share/applications/slack.desktop
+        sed "s|@USER@|$SUDO_USER|g; s|@USER_HOME@|$USER_HOME|g" \
+            "$SCRIPT_DIR"/journal-hygiene/logrotate-slack.in > /etc/logrotate.d/slack
+    else
+        echo "  Slack: not installed, skipping"
+    fi
+
+    if [ -e /usr/lib/systemd/user/localsearch-3.service ]; then
+        echo "  LocalSearch -> ~/.local/state/localsearch/localsearch.log"
+        # The drop-in's append: target dir must exist before the unit starts
+        installUser "$USER_HOME"/.local/state/localsearch
+        installUser "$USER_HOME"/.config/systemd/user/localsearch-3.service.d \
+            "$SCRIPT_DIR"/journal-hygiene/localsearch-suppress-journal-spam.conf
+        sed "s|@USER@|$SUDO_USER|g; s|@USER_HOME@|$USER_HOME|g" \
+            "$SCRIPT_DIR"/journal-hygiene/logrotate-localsearch.in > /etc/logrotate.d/localsearch
+        systemctl --user --machine="$SUDO_USER@.host" daemon-reload || true
+        systemctl --user --machine="$SUDO_USER@.host" try-restart localsearch-3.service || true
+        # Keep the indexer out of network-FUSE mounts under $HOME: gdfuse
+        # serves incomplete GIO metadata (steady GLib warnings), and an
+        # indexer read in flight when the network drops leaves an
+        # unfreezable D-state task that wedges suspend (see the machine
+        # suspend docs). Entries are basename globs — absolute paths are
+        # NOT matched — so this excludes any directory named 'mnt'.
+        if command -v gsettings > /dev/null; then
+            gsettings_set org.freedesktop.Tracker3.Miner.Files ignored-directories \
+                "['po', 'CVS', 'core-dumps', 'lost+found', 'mnt']"
+        fi
+    else
+        echo "  LocalSearch: not installed, skipping"
+    fi
+fi
+
+# =============================================================================
 banner "Finalizing"
 # =============================================================================
 

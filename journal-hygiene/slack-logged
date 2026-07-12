@@ -1,0 +1,14 @@
+#!/bin/bash
+set -u
+
+# Launch Slack with stdout/stderr sent to a size-capped log file instead
+# of the journal: Slack floods it with info-level chatter (DND polling,
+# idle transitions, metrics resets). Wired up via the Exec= line of the
+# ~/.local/share/applications/slack.desktop override that provision
+# generates. Size-capped rotation lives in /etc/logrotate.d/slack.
+# Revert: delete this file and the slack.desktop override.
+
+declare -r LOG_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/slack
+
+mkdir -p "$LOG_DIR"
+exec /usr/bin/slack "$@" >> "$LOG_DIR/slack.log" 2>&1

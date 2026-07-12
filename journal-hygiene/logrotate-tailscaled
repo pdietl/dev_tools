@@ -1,0 +1,14 @@
+# Size-capped rotation for /var/log/tailscaled.log (see
+# /etc/systemd/system/tailscaled.service.d/suppress-journal-spam.conf).
+# copytruncate because tailscaled keeps the fd open and has no
+# log-reopen signal. su because /var/log is group-writable by syslog,
+# which logrotate otherwise refuses to touch.
+/var/log/tailscaled.log {
+    su root syslog
+    size 10M
+    rotate 3
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

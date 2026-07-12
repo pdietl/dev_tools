@@ -24,6 +24,14 @@ Pete's current daily driver as of 2026-07), plus WSL boxes. Remote
   `gdfuse-suspend-guard` (every non-WSL machine) plus per-model sets gated on
   `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
   machine-fix notes.
+- **`journal-hygiene/`** — `provision`-installed redirects for the chattiest
+  desktop loggers (tailscaled, Slack, LocalSearch) into their own size-capped
+  log files (`/var/log/tailscaled.log`, `~/.local/state/{slack,localsearch}/`),
+  plus an hourly logrotate timer override so the size caps actually bind, and
+  a journald drop-in (20G persistent cap, 256M files, per-service flood
+  backstop of 1000 msgs/10s).
+  Also excludes `mnt` dirs from LocalSearch indexing (basename glob — absolute
+  paths aren't matched) so the indexer stays off network-FUSE mounts.
 - **`sysmon.sh`** — 1 Hz system monitor (screen + file logging).
 - **Machine-fix notes** live as top-level markdown, one per machine:
   `thinkpad-p16-gen3-ubuntu-suspend.md`, `thinkpad-t16-gen4-ubuntu-suspend.md`.
@@ -48,7 +56,10 @@ s2idle only. Platform suspend is healthy; the one real failure mode is the
 gdfuse FUSE freezer wedge → `thinkpad-t16-gen4-ubuntu-suspend.md`. Mitigated by
 `/usr/lib/systemd/system-sleep/gdfuse-suspend-guard` (repo `suspend/`, applied
 2026-07-12). amdgpu `ring gfx_0.0.0 timeout` + self-recovery lines are app
-GPU hangs, not suspend-related — don't chase.
+GPU hangs, not suspend-related — don't chase. Journal hygiene (repo
+`journal-hygiene/`: tailscaled/Slack/LocalSearch → own capped files, `mnt`
+excluded from indexing) applied 2026-07-12; Slack redirect effective from its
+next launch.
 
 ## Primary machine — pdietl-laptop
 
@@ -77,7 +88,9 @@ here. All reversible; each file self-documents.
   `~/.config/systemd/user/google-drive-ocamlfuse.service`. The `gdfuse` switch is
   needed only to **rebuild** (after a `git pull`); the binary itself runs without
   it. Full detail = suspend doc, failure mode 4.
-- **Journal spam → files** (out of `journalctl`):
+- **Journal spam → files** (out of `journalctl`) — hand-installed 2026-06-24;
+  now repo-tracked in `journal-hygiene/`, so the next `provision` run converges
+  these files (and adds the LocalSearch redirect + hourly logrotate override):
   - tailscaled → `/var/log/tailscaled.log`
     (`/etc/systemd/system/tailscaled.service.d/suppress-journal-spam.conf` +
     `/etc/logrotate.d/tailscaled`).

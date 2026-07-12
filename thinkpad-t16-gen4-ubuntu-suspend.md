@@ -71,6 +71,20 @@ Note the P16's patched-`statfs` binary would **not** have prevented the
 getattr/read flavor — only the `statfs` one. That is why the mitigation
 here sits at the suspend layer instead of patching FUSE ops one at a time.
 
+**Probable identity of the in-flight reader:** LocalSearch (GNOME's file
+indexer). Ubuntu 26.04 ships `index-recursive-directories ['$HOME']` —
+whole-home indexing — and `localsearch info` confirmed files on the
+gdfuse mount were "eligible to be indexed"; the miner's journal spam
+("GFileInfo created without standard::type") is the signature of crawling
+a FUSE mount that serves incomplete GIO metadata. Every observed property
+of the stuck task matches (parented by the user manager, GLib `pool-N`
+worker thread, content `pread64`), though the process itself couldn't be
+identified post-hoc. Mitigated at the source since 2026-07-12: `mnt` is in
+LocalSearch's `ignored-directories` (set by `provision`'s journal-hygiene
+section; basename glob — absolute paths are not matched), so the indexer
+no longer touches the Drive mount at all. The sleep-hook guard below
+still covers every other reader.
+
 ---
 
 ## Mitigation: `gdfuse-suspend-guard` sleep hook
@@ -167,3 +181,7 @@ journalctl -b 0 -k | grep -E 'ring gfx.*timeout|device wedged'
   failed on `fuse_do_getattr`/`fuse_file_read_iter`. Hard power-off at
   11:13. Root-caused the same day; wrote `gdfuse-suspend-guard`, added
   hardware-gated suspend mitigations to `provision`, and created this doc.
+- **2026-07-12 (later)** — while routing journal spam to files
+  (`journal-hygiene/`), found LocalSearch recursively indexes all of
+  `$HOME` on 26.04 and had the Drive mount in scope — the probable
+  in-flight reader above. Excluded `mnt` from its `ignored-directories`.
