@@ -157,6 +157,7 @@ declare -a packages=(
     ddd
     device-tree-compiler
     dkms
+    dmidecode
     docker-buildx-plugin
     docker-ce
     docker-ce-cli
@@ -591,6 +592,61 @@ udevadm control --reload
 echo "  gdbinit: installing"
 _cp "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
 _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.gdbinit
+
+# =============================================================================
+banner "Suspend mitigations"
+# =============================================================================
+
+if in_wsl; then
+    echo "  Suspend mitigations: skipped (WSL)"
+else
+    # A FUSE filesystem whose daemon blocks on a dead network leaves callers
+    # in unfreezable D-state, so every suspend attempt fails; applies to any
+    # machine that mounts google-drive-ocamlfuse.
+    echo "  gdfuse suspend guard: installing"
+    _install -m 0755 -t /usr/lib/systemd/system-sleep \
+        "$SCRIPT_DIR"/suspend/gdfuse-suspend-guard
+
+    hw_model=$(dmidecode -s system-version 2> /dev/null || echo unknown)
+    case "$hw_model" in
+    'ThinkPad P16 Gen 3')
+        # See thinkpad-p16-gen3-ubuntu-suspend.md for the full rationale.
+        echo "  $hw_model: applying suspend mitigations"
+        reboot_needed=0
+        for f in nvidia-s0ix.conf nvidia-resume-speed.conf; do
+            if ! cmp -s "$SCRIPT_DIR/suspend/p16-gen3/$f" "/etc/modprobe.d/$f"; then
+                _install -m 0644 -t /etc/modprobe.d "$SCRIPT_DIR/suspend/p16-gen3/$f"
+                reboot_needed=1
+            fi
+        done
+        _install -m 0755 -t /usr/lib/systemd/system-sleep \
+            "$SCRIPT_DIR"/suspend/p16-gen3/igc-ptm-workaround
+        # Skip the grub drop-in if the i915 params are already configured
+        # (e.g. hand-edited into /etc/default/grub) to avoid duplicates.
+        if ! grep -qs 'i915\.enable_psr=0' /etc/default/grub /etc/default/grub.d/*.cfg; then
+            _install -m 0644 -t /etc/default/grub.d \
+                "$SCRIPT_DIR"/suspend/p16-gen3/i915-suspend.cfg
+            reboot_needed=1
+        fi
+        if [ "$reboot_needed" -eq 1 ]; then
+            update-initramfs -u
+            update-grub
+            echo "  NOTE: nvidia/i915 suspend mitigations changed; reboot to apply."
+        fi
+        echo "  NOTE: the patched-statfs google-drive-ocamlfuse build (failure"
+        echo "        mode 4) remains a manual step; see the suspend doc."
+        ;;
+    'ThinkPad T16 Gen 4')
+        # amdgpu suspend/resume is healthy on this hardware; the gdfuse guard
+        # above covers its only observed suspend failure. See
+        # thinkpad-t16-gen4-ubuntu-suspend.md.
+        echo "  $hw_model: no hardware-specific mitigations needed"
+        ;;
+    *)
+        echo "  $hw_model: no hardware-specific suspend mitigations known"
+        ;;
+    esac
+fi
 
 # =============================================================================
 banner "Finalizing"

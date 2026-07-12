@@ -1,0 +1,47 @@
+#!/bin/bash
+set -u
+
+# Workaround for the igc driver polling IGC_PTM_STAT on resume when PCIe PTM
+# is already disabled on the device: the PCI core disables PTM before the
+# driver's suspend hook runs, so igc_ptp_reset()'s unconditional poll always
+# times out and spams "Timeout reading IGC_PTM_STAT register". Unbind igc
+# NICs before suspend (so the reset path never runs on resume) and rebind
+# after; NetworkManager reconnects within ~200 ms.
+# Remove this once upstream makes the poll in igc_ptp_reset() conditional.
+# Revert: delete this file.
+
+declare -r DRIVER_PATH='/sys/bus/pci/drivers/igc'
+declare -r STATE_FILE='/run/igc-ptm-workaround.devices'
+declare -r LOG_TAG='igc-ptm-workaround'
+
+log() {
+    logger -t "$LOG_TAG" "$1"
+}
+
+case "$1/$2" in
+pre/*)
+    rm -f "$STATE_FILE"
+    for dev_path in "$DRIVER_PATH"/*:*:*.*; do
+        [[ -e $dev_path ]] || continue
+        dev=$(basename "$dev_path")
+        if echo "$dev" > "$DRIVER_PATH/unbind" 2> /dev/null; then
+            echo "$dev" >> "$STATE_FILE"
+            log "unbound $dev before $2"
+        else
+            log "WARN: unbind failed for $dev"
+        fi
+    done
+    ;;
+
+post/*)
+    [[ -e $STATE_FILE ]] || exit 0
+    while read -r dev; do
+        if echo "$dev" > "$DRIVER_PATH/bind" 2> /dev/null; then
+            log "rebound $dev after $2"
+        else
+            log "ERROR: rebind failed for $dev — network may be down"
+        fi
+    done < "$STATE_FILE"
+    rm -f "$STATE_FILE"
+    ;;
+esac

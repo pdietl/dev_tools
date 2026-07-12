@@ -1,9 +1,10 @@
 # CLAUDE.md — dev_tools
 
 Pete Dietl's personal dev environment: dotfiles, a machine-provisioning script,
-embedded-dev udev rules, and machine-specific fix notes. Deployed primarily to
-**pdietl-laptop** (also WSL boxes). Remote `git@github.com:pdietl/dev_tools.git`,
-branch `master`.
+embedded-dev udev rules, and machine-specific fix notes. Deployed to
+**pdietl-laptop** (ThinkPad P16 Gen 3) and **pdietl-t16** (ThinkPad T16 Gen 4,
+Pete's current daily driver as of 2026-07), plus WSL boxes. Remote
+`git@github.com:pdietl/dev_tools.git`, branch `master`.
 
 ## What this repo is / how it deploys
 
@@ -19,9 +20,14 @@ branch `master`.
   `ntfy`, `wsl_usb_attach`/`detach`, `reset`).
 - **`udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP, picoprobe,
   WCH-Link, xgecu); see `udev_rules/README.md`.
+- **`suspend/`** — suspend/resume mitigation files `provision` installs:
+  `gdfuse-suspend-guard` (every non-WSL machine) plus per-model sets gated on
+  `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
+  machine-fix notes.
 - **`sysmon.sh`** — 1 Hz system monitor (screen + file logging).
-- **Machine-fix notes** live as top-level markdown; model:
-  `thinkpad-p16-gen3-ubuntu-suspend.md`. Append new machine fixes there.
+- **Machine-fix notes** live as top-level markdown, one per machine:
+  `thinkpad-p16-gen3-ubuntu-suspend.md`, `thinkpad-t16-gen4-ubuntu-suspend.md`.
+  Follow that model for new machines.
 
 ## Conventions
 
@@ -33,6 +39,16 @@ branch `master`.
   carries a header comment saying why it exists and how to revert — and index them
   in a machine-notes markdown here.
 - `.claude/` is gitignored; this `CLAUDE.md` is tracked.
+
+## Machine — pdietl-t16 (current daily driver)
+
+ThinkPad **T16 Gen 4** (`21QN005XUS`), Ubuntu **26.04**, AMD **Krackan** APU
+(`amdgpu`), MediaTek **MT7925** Wi-Fi 7 (`mt7925e`), Realtek ethernet (`r8169`);
+s2idle only. Platform suspend is healthy; the one real failure mode is the
+gdfuse FUSE freezer wedge → `thinkpad-t16-gen4-ubuntu-suspend.md`. Mitigated by
+`/usr/lib/systemd/system-sleep/gdfuse-suspend-guard` (repo `suspend/`, applied
+2026-07-12). amdgpu `ring gfx_0.0.0 timeout` + self-recovery lines are app
+GPU hangs, not suspend-related — don't chase.
 
 ## Primary machine — pdietl-laptop
 
