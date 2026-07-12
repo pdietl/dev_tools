@@ -1,0 +1,9 @@
+# Hide ZFS pool member partitions (e.g. bpool/rpool on a ZFS-on-root
+# install) from udisks, so GNOME stops showing them as mountable "SSD"
+# volumes in the dock, Files sidebar, and desktop. Pool members are
+# vdevs — mounting one through udisks can never do anything useful.
+# Matches only devices with a zfs_member filesystem signature; real
+# removable media are unaffected.
+# Revert: delete this rule, `udevadm control --reload`, and re-trigger
+# the affected partitions (or reboot).
+SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="zfs_member", ENV{UDISKS_IGNORE}="1"

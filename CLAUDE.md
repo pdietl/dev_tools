@@ -19,7 +19,8 @@ Pete's current daily driver as of 2026-07), plus WSL boxes. Remote
 - **`bin/`** — user scripts on `$PATH` (`netinfo`, `do_cscope`, `do_update`,
   `ntfy`, `wsl_usb_attach`/`detach`, `reset`).
 - **`udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP, picoprobe,
-  WCH-Link, xgecu); see `udev_rules/README.md`.
+  WCH-Link, xgecu) plus a rule hiding ZFS pool members from GNOME's dock/Files;
+  see `udev_rules/README.md`.
 - **`suspend/`** — suspend/resume mitigation files `provision` installs:
   `gdfuse-suspend-guard` (every non-WSL machine) plus per-model sets gated on
   `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
