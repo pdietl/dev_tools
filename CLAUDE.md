@@ -25,6 +25,9 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   `gdfuse-suspend-guard` (every non-WSL machine) plus per-model sets gated on
   `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
   machine-fix notes.
+- **`hidpi-boot/`** — HiDPI boot-display fixes `provision` installs per-model
+  (P16 Gen 3's 3840x2400 panel): 32 px GRUB font drop-in + Plymouth
+  `DeviceScale=2` so the GRUB menu and disk-decryption prompt are readable.
 - **`journal-hygiene/`** — `provision`-installed redirects for the chattiest
   desktop loggers (tailscaled, Slack, LocalSearch) into their own size-capped
   log files (`/var/log/tailscaled.log`, `~/.local/state/{slack,localsearch}/`),
@@ -59,8 +62,10 @@ returned from keyboard replacement; hostname renamed `pdietl-t16` →
 different SSD, and most of its hand-applied live state does not exist here
 (see "Deltas" below).
 
-Hardware: Intel **Arrow Lake-S** iGPU (`i915`; drives the eDP panel + DP
-outputs) + NVIDIA **RTX PRO 1000 Blackwell** dGPU (external outputs only);
+Hardware: Intel **Arrow Lake-S** iGPU (`i915`) + NVIDIA **RTX PRO 1000
+Blackwell** dGPU; a BIOS eDP MUX (Config → Display → Graphics Device)
+selects which one drives the panel — **currently Discrete**, so the dGPU
+owns the panel and all external outputs;
 Intel **BE200** Wi-Fi 7 (`iwlwifi`); Intel **I226-LM** ethernet (`igc`);
 suspend is **s2idle** only. Bleeding-edge silicon — many driver-level journal
 warnings are upstream bugs already mitigated; don't chase them blindly.
@@ -74,11 +79,20 @@ The repo `suspend/p16-gen3/` set was applied to this install 2026-07-18
 `gdfuse-suspend-guard` and repo `journal-hygiene/` carried over from the
 T16 era (applied 2026-07-12).
 
+### Boot-time HiDPI text (applied 2026-07-18)
+GRUB and Plymouth (including the disk-decryption prompt) render on the
+panel's native 3840x2400 (~260 DPI) and were unreadably small. Fixed by
+repo `hidpi-boot/` via `provision` (DMI-gated): 32 px `grub-mkfont` DejaVu
+Mono + `GRUB_FONT` drop-in, and Plymouth `DeviceScale=2` baked into the
+initramfs. Both installed files self-document their revert steps.
+
 ### Deltas vs the previous pdietl-laptop install (as of 2026-07-18)
-- **No NVIDIA proprietary driver** — the dGPU is on `nouveau`, so the
-  `nvidia-*.conf` modprobe files are inert and dGPU external outputs are
-  unavailable. If `nvidia-driver-595` gets installed, expect to
-  `systemctl disable nvidia-powerd` again (SEGV crash-loop on this combo).
+- **NVIDIA**: `nvidia-driver-595-open` + `prime-select nvidia` installed
+  2026-07-18, BIOS switched Hybrid → Discrete the same day (panel now on
+  the dGPU — suspend implications in the suspend doc's topology note).
+  If `nvidia-powerd` starts SEGV-crash-looping, `systemctl disable` it
+  (it did on the previous install). Avoid DisplayLink/evdi heads while in
+  Discrete mode (multi-second lag; see suspend doc).
 - **gdfuse**: the patched non-blocking-`statfs` build (upstream
   astrada/google-drive-ocamlfuse **PR #943**, pinned fork commit) is at
   `/usr/local/bin`, installed by `provision`'s "google-drive-ocamlfuse

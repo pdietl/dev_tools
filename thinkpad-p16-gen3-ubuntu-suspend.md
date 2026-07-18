@@ -13,8 +13,8 @@ fixes were needed on 24.04 and again on 26.04.
 
 | Component | PCI BDF | Driver | Role |
 |-----------|---------|--------|------|
-| Intel Arrow Lake-S iGPU | `00:02.0` | `i915` | Drives the internal eDP-1 panel + 4× DP outputs |
-| NVIDIA RTX PRO 1000 Blackwell | `01:00.0` | `nvidia` | Drives only external HDMI/DP — disconnected when docked-less |
+| Intel Arrow Lake-S iGPU | `00:02.0` | `i915` | Drives the eDP-1 panel (BIOS Hybrid mode) + 4× DP outputs |
+| NVIDIA RTX PRO 1000 Blackwell | `01:00.0` | `nvidia` | External HDMI/DP; in BIOS Discrete mode also the eDP panel |
 | Intel I226-LM Ethernet | `86:00.0` | `igc` | `enp134s0` |
 
 **OS at time of writing (2026-06-20):** Ubuntu 26.04 LTS (Resolute Raccoon),
@@ -28,11 +28,24 @@ $ cat /sys/power/mem_sleep
 This hardware does *not* expose deep `mem` (S3) suspend, so every mitigation
 below assumes s2idle.
 
-**Key topology fact:** the internal laptop panel is **hard-wired to the
-Intel iGPU**, not to the NVIDIA dGPU. The dGPU has only external outputs.
-So no PRIME mode and no "always use the dGPU" workaround can bypass the
-i915 KMS path for the laptop screen — a BIOS MUX would be needed and this
-SKU doesn't appear to expose one.
+**Key topology fact (revised 2026-07-18):** which GPU drives the internal
+panel is selected by a BIOS **eDP MUX** — Config → Display → Graphics
+Device:
+
+- **Hybrid Graphics** (factory default; every pre-2026-07 measurement in
+  this doc was taken here): panel on the Intel iGPU. No PRIME mode can
+  take the panel off the i915 KMS path in this mode — PRIME only moves
+  *rendering*, never panel scanout.
+- **Discrete Graphics**: the MUX hands the panel to the NVIDIA dGPU
+  (verified live: `eDP-1` appears as a connector of the nvidia DRM card
+  and i915 retains no connected outputs; i915 still loads but scans out
+  nothing).
+
+The June conclusion that "this SKU doesn't appear to expose a MUX" was
+wrong — the option exists under Config → Display and works. Consequences:
+in Discrete mode the i915 C10 PHY restore path (failure mode 3) cannot
+touch the panel, and panel suspend/resume instead rides the NVIDIA
+driver's S0ix path (failure mode 2's mitigations).
 
 ---
 
@@ -75,7 +88,10 @@ freeze them.
 
 ### 3. i915 C10 PHY/PLL fails on resume — *the* GUI hang
 
-The eDP panel is wired to the iGPU. On suspend the iGPU enters a deep
+*BIOS Hybrid mode only: in Discrete mode the panel is not on i915 and
+this failure mode cannot occur (see the topology note above).*
+
+In Hybrid mode the eDP panel is wired to the iGPU. On suspend the iGPU enters a deep
 display power state (DC9 in particular); on resume the C10 PHY/PLL
 restore path is fragile on Arrow Lake-HX and presents in two distinct
 flavors on this machine:
@@ -248,6 +264,10 @@ Three i915 knobs targeting problem (3), in the order they were added:
 Power cost: probably 1–2 W extra at idle, total. Insignificant relative
 to a hard reboot.
 
+In BIOS Discrete mode these params protect nothing (i915 scans out no
+display) but cost nothing either — keep them so a return to Hybrid mode
+stays mitigated without remembering this step.
+
 ### `google-drive-ocamlfuse` — patched non-blocking `statfs` (fixes mode 4)
 
 The packaged `google-drive-ocamlfuse` deb is **removed**; a patched build from
@@ -415,6 +435,9 @@ done                                              # connector status (eDP-1 shou
 
 ## Measured effectiveness
 
+All numbers below were measured in BIOS **Hybrid** mode on the original
+2026-06 install; Discrete-mode reliability has no comparable dataset yet.
+
 | | Before any mitigations | After PSR=0 + DC=0 + S0ix=1 + igc + PreserveVRAM=0 |
 |---|---|---|
 | Forced reboots due to dead GUI on resume | most long suspends | ~1 per 3 days |
@@ -444,11 +467,20 @@ measured (it's the latest change as of this writing).
 - **Newer kernels** would be the cleanest path to upstream fixes for the
   C10 PHY restore code. As of 2026-06-20 `apt list --upgradable` shows
   nothing newer than `7.0.0-22` in the 26.04 HWE archive.
-- **The dGPU cannot rescue the panel** — see "Hardware / OS baseline"
-  above. The only way to bypass i915 KMS for the laptop screen is a
-  BIOS-level eDP MUX, which this SKU doesn't expose. PRIME modes (hybrid
-  / on-demand / performance) don't help because the panel scanout still
-  goes through i915 regardless of which GPU does rendering.
+- **The dGPU *can* rescue the panel — via the BIOS MUX (found
+  2026-07-18).** BIOS Discrete mode moves eDP scanout to the NVIDIA card,
+  sidestepping every residual i915 PHY failure above. What replaces it is
+  unmeasured: panel resume then depends on the NVIDIA S0ix path
+  (`nvidia-s0ix.conf` + `PreserveVideoMemoryAllocations=0` become
+  load-bearing for the *panel*, not just externals). Watch the first
+  weeks of long suspends in Discrete mode before declaring it the better
+  trade.
+- **Discrete mode + DisplayLink don't mix.** With the panel on the
+  nvidia card, mutter picks it as primary/render GPU, and any DisplayLink
+  (evdi) head degrades to an unaccelerated per-frame CPU readback —
+  multi-second lag (mutter bug, Launchpad #1970291). Resolved by moving
+  that monitor to a native output (laptop HDMI); avoid evdi heads while
+  in Discrete mode.
 
 ---
 
@@ -479,6 +511,15 @@ measured (it's the latest change as of this writing).
   the existing mitigations. One occurrence was fatal (forced reboot after
   ~30 s of dark screen). Added `i915.disable_power_well=0`; effectiveness
   pending observation across more multi-day boots.
+- **2026-07-18** — the T16's NVMe (this doc's install) moved into this
+  chassis. Installed `nvidia-driver-595-open` + `prime-select nvidia`,
+  then flipped BIOS Config → Display → Graphics Device from Hybrid to
+  **Discrete** — discovering the eDP MUX the June investigation had
+  concluded didn't exist (panel verified on the nvidia DRM card). Fallout:
+  a DisplayLink dock head became ~5 s laggy (evdi + NVIDIA-primary CPU
+  readback; see Known residuals) and was replaced with a direct HDMI
+  connection at native 2560x1440@120. Discrete-mode suspend reliability
+  under observation from this date.
 - **2026-06-24** — the suspend storm returned (97 failed suspends / ~30 min) but
   the logs showed a *new* cause: 2 `pool-*` threads stuck in `fuse_statfs` on the
   `google-drive-ocamlfuse` mount (S0ix=1 was live, so not mode 2). Root-caused to

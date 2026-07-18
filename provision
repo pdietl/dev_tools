@@ -166,6 +166,7 @@ declare -a packages=(
     exuberant-ctags
     fd-find
     flex
+    fonts-dejavu-core
     fzf
     gawk
     gcc-multilib
@@ -703,6 +704,50 @@ else
         ;;
     *)
         echo "  $hw_model: no hardware-specific suspend mitigations known"
+        ;;
+    esac
+fi
+
+# =============================================================================
+banner "Boot display (HiDPI)"
+# =============================================================================
+
+# GRUB and Plymouth (including the disk-decryption prompt) render at the
+# panel's native resolution; on a HiDPI panel the default 16 px GRUB font
+# and Plymouth's 1x UI are unreadably small. Per-model, since the right
+# scale is a property of the panel. Sources live in hidpi-boot/.
+if in_wsl; then
+    echo "  Boot display: skipped (WSL)"
+else
+    hw_model=$(dmidecode -s system-version 2> /dev/null || echo unknown)
+    case "$hw_model" in
+    'ThinkPad P16 Gen 3') # 3840x2400 eDP, ~260 DPI
+        echo "  $hw_model: 32 px GRUB font + Plymouth DeviceScale=2"
+        grub_refresh=0
+        if [ ! -e /boot/grub/fonts/DejaVuSansMono-32.pf2 ]; then
+            _mkdir -p /boot/grub/fonts
+            grub-mkfont -s 32 -o /boot/grub/fonts/DejaVuSansMono-32.pf2 \
+                /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+            grub_refresh=1
+        fi
+        if ! cmp -s "$SCRIPT_DIR"/hidpi-boot/hidpi-grub-font.cfg \
+            /etc/default/grub.d/hidpi-grub-font.cfg; then
+            _install -m 0644 -t /etc/default/grub.d \
+                "$SCRIPT_DIR"/hidpi-boot/hidpi-grub-font.cfg
+            grub_refresh=1
+        fi
+        if [ "$grub_refresh" -eq 1 ]; then
+            update-grub
+        fi
+        if ! cmp -s "$SCRIPT_DIR"/hidpi-boot/plymouthd.conf \
+            /etc/plymouth/plymouthd.conf; then
+            _install -m 0644 "$SCRIPT_DIR"/hidpi-boot/plymouthd.conf \
+                /etc/plymouth/plymouthd.conf
+            update-initramfs -u
+        fi
+        ;;
+    *)
+        echo "  $hw_model: no HiDPI boot tweaks known"
         ;;
     esac
 fi
