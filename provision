@@ -118,9 +118,6 @@ echo \
     "$(. /etc/os-release && echo "$VERSION_CODENAME") stable" > \
     /etc/apt/sources.list.d/docker.list
 
-echo "  Adding google-drive-ocamlfuse PPA..."
-add-apt-repository --no-update -y ppa:alessandro-strada/ppa > /dev/null 2>&1
-
 # =============================================================================
 banner "Installing packages"
 # =============================================================================
@@ -174,7 +171,6 @@ declare -a packages=(
     gcc-multilib
     gdb-multiarch
     gnome-tweaks
-    google-drive-ocamlfuse
     gparted
     graphviz
     groff
@@ -188,19 +184,26 @@ declare -a packages=(
     jq
     jsonlint
     lbzip2
+    libcurl4-gnutls-dev
     libelf-dev
+    libfuse3-dev
+    libgmp-dev
+    libsqlite3-dev
     libssl-dev
     libvirt-clients
     libvirt-dev
     linux-tools-generic
     lua5.1
     luarocks
+    m4
     meson
     nasm
     net-tools
     nfs-kernel-server
     ninja-build
     nmap
+    ocaml
+    opam
     openjdk-8-jdk
     openjdk-8-jdk-headless
     openssh-server
@@ -594,6 +597,62 @@ _cp "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
 _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.gdbinit
 
 # =============================================================================
+banner "google-drive-ocamlfuse (patched statfs build)"
+# =============================================================================
+
+# Built from a pinned fork commit instead of the PPA deb: the fork makes
+# statfs non-blocking (upstream issue #896 / PR #943). A blocking statfs
+# leaves df, GTK file choosers, and some PAM stacks in uninterruptible
+# D-state whenever Drive or the network stalls, which also wedges suspend
+# (the kernel freezer cannot freeze D-state tasks). Once upstream merges
+# the PR and the PPA ships it, drop this section, restore the deb in the
+# package list, and remove /usr/local/bin/google-drive-ocamlfuse + stamp.
+declare -r GDFUSE_REPO=https://github.com/pdietl/google-drive-ocamlfuse
+declare -r GDFUSE_COMMIT=972dab0041ede9dec2abbe81baa4bdb7613fac5e
+declare -r GDFUSE_BIN=/usr/local/bin/google-drive-ocamlfuse
+declare -r GDFUSE_STAMP=/usr/local/share/google-drive-ocamlfuse.commit
+
+if [ -x "$GDFUSE_BIN" ] && [ "$(cat "$GDFUSE_STAMP" 2> /dev/null || true)" = "$GDFUSE_COMMIT" ]; then
+    echo "  $GDFUSE_BIN already built from $GDFUSE_COMMIT"
+else
+    echo "  Building $GDFUSE_COMMIT (as $SUDO_USER, opam switch 'gdfuse')..."
+    gdfuse_build_dir=$(sudo -u "$SUDO_USER" mktemp -d /tmp/gdfuse-build.XXXXXX)
+    sudo -H -u "$SUDO_USER" env OPAMYES=1 bash -ec "
+        git clone -q '$GDFUSE_REPO' '$gdfuse_build_dir/src'
+        git -C '$gdfuse_build_dir/src' checkout -q '$GDFUSE_COMMIT'
+        cd '$gdfuse_build_dir/src'
+        [ -d \"\$HOME/.opam\" ] || opam init --bare -n > /dev/null
+        opam switch list -s 2> /dev/null | grep -qx gdfuse ||
+            opam switch create gdfuse ocaml-system
+        eval \"\$(opam env --switch=gdfuse --set-switch)\"
+        opam install --deps-only .
+        dune build --profile release bin/gdfuse.exe
+    "
+    _install -m 0755 "$gdfuse_build_dir/src/_build/default/bin/gdfuse.exe" "$GDFUSE_BIN"
+    echo "$GDFUSE_COMMIT" > "$GDFUSE_STAMP"
+    rm -rf "$gdfuse_build_dir"
+fi
+
+# The fork build replaces the deb; remove it only after the build succeeded
+# so a failed build doesn't leave the machine with no gdfuse binary at all.
+if dpkg -s google-drive-ocamlfuse > /dev/null 2>&1; then
+    echo "  Removing the PPA deb (superseded by $GDFUSE_BIN)"
+    _apt_get remove -y google-drive-ocamlfuse
+fi
+if ls /etc/apt/sources.list.d/*alessandro-strada* > /dev/null 2>&1; then
+    add-apt-repository --remove --no-update -y ppa:alessandro-strada/ppa > /dev/null 2>&1
+fi
+
+# A pre-existing user unit may still point at the deb path; converge it.
+gdfuse_unit=$USER_HOME/.config/systemd/user/google-drive-ocamlfuse.service
+if [ -f "$gdfuse_unit" ] && grep -q '^ExecStart=/usr/bin/google-drive-ocamlfuse' "$gdfuse_unit"; then
+    sed -i "s|^ExecStart=/usr/bin/google-drive-ocamlfuse|ExecStart=$GDFUSE_BIN|" "$gdfuse_unit"
+    systemctl --user --machine="$SUDO_USER@.host" daemon-reload || true
+    echo "  NOTE: user unit repointed to $GDFUSE_BIN; restart the service to pick it up:"
+    echo "        systemctl --user restart google-drive-ocamlfuse.service"
+fi
+
+# =============================================================================
 banner "Suspend mitigations"
 # =============================================================================
 
@@ -633,8 +692,8 @@ else
             update-grub
             echo "  NOTE: nvidia/i915 suspend mitigations changed; reboot to apply."
         fi
-        echo "  NOTE: the patched-statfs google-drive-ocamlfuse build (failure"
-        echo "        mode 4) remains a manual step; see the suspend doc."
+        echo "  NOTE: failure mode 4 is fixed by the patched google-drive-ocamlfuse"
+        echo "        built in the section above."
         ;;
     'ThinkPad T16 Gen 4')
         # amdgpu suspend/resume is healthy on this hardware; the gdfuse guard

@@ -264,14 +264,16 @@ better than hanging. Verified: 30 `statfs` calls add **zero** metadata-refresh
 log lines (`-verbose`).
 
 Build (the OCaml toolchain was absent): `apt install opam libfuse3-dev
-libsqlite3-dev libgmp-dev libcurl4-openssl-dev`, `opam switch create gdfuse
+libsqlite3-dev libgmp-dev libcurl4-gnutls-dev` (gnutls, not openssl — opam's
+depext for ocurl checks for that exact package), `opam switch create gdfuse
 ocaml-system` (system OCaml 5.4.0), `opam install --deps-only .`, `dune build
 --profile release bin/gdfuse.exe`, `sudo install -m755
 _build/default/bin/gdfuse.exe /usr/local/bin/google-drive-ocamlfuse`. The binary
 dynamically links system libs (fuse3/sqlite3/gmp/curl) so it runs without the
 opam switch; the `gdfuse` switch is needed only to **rebuild** (after a `git
-pull`, or to regenerate the patch). The working-tree patch is uncommitted — its
-durable home is an upstream PR against astrada/google-drive-ocamlfuse #896.
+pull`, or to regenerate the patch). The patch is committed on branch
+`nonblocking-statfs` of the `pdietl` fork and submitted upstream as
+astrada/google-drive-ocamlfuse PR #943 (fixes issue #896).
 
 Revert: `sudo apt install google-drive-ocamlfuse` and point `ExecStart` back at
 `/usr/bin/google-drive-ocamlfuse`.

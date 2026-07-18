@@ -2,9 +2,9 @@
 
 Pete Dietl's personal dev environment: dotfiles, a machine-provisioning script,
 embedded-dev udev rules, and machine-specific fix notes. Deployed to
-**pdietl-laptop** (ThinkPad P16 Gen 3) and **pdietl-t16** (ThinkPad T16 Gen 4,
-Pete's current daily driver as of 2026-07), plus WSL boxes. Remote
-`git@github.com:pdietl/dev_tools.git`, branch `master`.
+**pdietl-laptop** (ThinkPad P16 Gen 3, Pete's daily driver) plus WSL boxes;
+the ThinkPad T16 Gen 4 chassis is currently diskless (see machine section).
+Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
 
 ## What this repo is / how it deploys
 
@@ -49,60 +49,51 @@ Pete's current daily driver as of 2026-07), plus WSL boxes. Remote
   in a machine-notes markdown here.
 - `.claude/` is gitignored; this `CLAUDE.md` is tracked.
 
-## Machine — pdietl-t16 (current daily driver)
+## Machine — pdietl-laptop (daily driver)
 
-ThinkPad **T16 Gen 4** (`21QN005XUS`), Ubuntu **26.04**, AMD **Krackan** APU
-(`amdgpu`), MediaTek **MT7925** Wi-Fi 7 (`mt7925e`), Realtek ethernet (`r8169`);
-s2idle only. Platform suspend is healthy; the one real failure mode is the
-gdfuse FUSE freezer wedge → `thinkpad-t16-gen4-ubuntu-suspend.md`. Mitigated by
-`/usr/lib/systemd/system-sleep/gdfuse-suspend-guard` (repo `suspend/`, applied
-2026-07-12). amdgpu `ring gfx_0.0.0 timeout` + self-recovery lines are app
-GPU hangs, not suspend-related — don't chase. Journal hygiene (repo
-`journal-hygiene/`: tailscaled/Slack/LocalSearch → own capped files, `mnt`
-excluded from indexing) applied 2026-07-12; Slack redirect effective from its
-next launch.
+ThinkPad **P16 Gen 3** (`21RQCTO1WW`) chassis running the Ubuntu **26.04**
+install originally provisioned on the T16 (NVMe moved 2026-07-18 when the P16
+returned from keyboard replacement; hostname renamed `pdietl-t16` →
+`pdietl-laptop`, tailnet re-registered under the new name, same IP). ZFS root.
+**This is not the pre-2026-07 `pdietl-laptop` install** — that lived on a
+different SSD, and most of its hand-applied live state does not exist here
+(see "Deltas" below).
 
-## Primary machine — pdietl-laptop
-
-ThinkPad **P16 Gen 3** (`21RQCTO1WW`), Ubuntu **26.04**, kernel **7.0.0-22**.
-Intel **Arrow Lake-S** iGPU (`i915`; drives the eDP panel + DP outputs) + NVIDIA
-**RTX PRO 1000 Blackwell** dGPU (`nvidia` 595; external outputs only); Intel
-**BE200** Wi-Fi 7 (`iwlwifi`/`iwlmld`); suspend is **s2idle** only. It's
-bleeding-edge silicon, so many driver-level journal warnings are upstream bugs
-already mitigated — don't chase them blindly.
+Hardware: Intel **Arrow Lake-S** iGPU (`i915`; drives the eDP panel + DP
+outputs) + NVIDIA **RTX PRO 1000 Blackwell** dGPU (external outputs only);
+Intel **BE200** Wi-Fi 7 (`iwlwifi`); Intel **I226-LM** ethernet (`igc`);
+suspend is **s2idle** only. Bleeding-edge silicon — many driver-level journal
+warnings are upstream bugs already mitigated; don't chase them blindly.
 
 ### Suspend/resume → `thinkpad-p16-gen3-ubuntu-suspend.md`
 Canonical doc: four suspend failure modes + mitigations (NVIDIA S0ix, i915
-PSR/DC/power-well kernel params, the igc PTM sleep-hook, and the 2026-06-24
+PSR/DC/power-well kernel params, the igc PTM sleep-hook, and the
 Google-Drive-FUSE `statfs` fix). **Read it before touching suspend.**
+The repo `suspend/p16-gen3/` set was applied to this install 2026-07-18
+(i915 grub params active after the next reboot). The universal
+`gdfuse-suspend-guard` and repo `journal-hygiene/` carried over from the
+T16 era (applied 2026-07-12).
 
-### Live system state applied 2026-06-24 (journal hygiene + fixes)
-Not tracked in this repo (they live in `/etc` + the user systemd session) — indexed
-here. All reversible; each file self-documents.
+### Deltas vs the previous pdietl-laptop install (as of 2026-07-18)
+- **No NVIDIA proprietary driver** — the dGPU is on `nouveau`, so the
+  `nvidia-*.conf` modprobe files are inert and dGPU external outputs are
+  unavailable. If `nvidia-driver-595` gets installed, expect to
+  `systemctl disable nvidia-powerd` again (SEGV crash-loop on this combo).
+- **gdfuse**: the patched non-blocking-`statfs` build (upstream
+  astrada/google-drive-ocamlfuse **PR #943**, pinned fork commit) is at
+  `/usr/local/bin`, installed by `provision`'s "google-drive-ocamlfuse
+  (patched statfs build)" section (deb + PPA removed, user unit repointed;
+  applied + verified 2026-07-18). The `gdfuse` opam switch exists for
+  rebuilds; bump `GDFUSE_COMMIT` in `provision` to roll the pin.
+- The old install's apparmor Varlink rules, PCP masks, and nvidia-powerd
+  disable don't exist here and haven't been needed (no denial storm observed).
 
-- **Suspend storm fixed at the source.** `Freezing user space processes failed
-  (2 tasks … fuse_statfs)` was `google-drive-ocamlfuse`'s blocking `statfs`
-  (upstream #896) on `~/mnt/GoogleDrive`, **not** an NVIDIA/i915 mode. Patched it
-  non-blocking in `~/Repos/google-drive-ocamlfuse` (working tree, **uncommitted**),
-  built release via opam switch **`gdfuse`** (system OCaml 5.4.0), installed to
-  **`/usr/local/bin/google-drive-ocamlfuse`**, removed the deb, repointed
-  `~/.config/systemd/user/google-drive-ocamlfuse.service`. The `gdfuse` switch is
-  needed only to **rebuild** (after a `git pull`); the binary itself runs without
-  it. Full detail = suspend doc, failure mode 4.
-- **Journal spam → files** (out of `journalctl`) — hand-installed 2026-06-24;
-  now repo-tracked in `journal-hygiene/`, so the next `provision` run converges
-  these files (and adds the LocalSearch redirect + hourly logrotate override):
-  - tailscaled → `/var/log/tailscaled.log`
-    (`/etc/systemd/system/tailscaled.service.d/suppress-journal-spam.conf` +
-    `/etc/logrotate.d/tailscaled`).
-  - Slack → `~/.local/state/slack/slack.log` (`~/.local/bin/slack-logged` wrapper
-    + `~/.local/share/applications/slack.desktop` override + `/etc/logrotate.d/slack`;
-    effective on next Slack launch).
-- **apparmor:** geoclue + cups-browsed denied the systemd-resolved Varlink socket
-  (~1110 denials/boot) → rules in
-  `/etc/apparmor.d/local/{usr.libexec.geoclue,usr.sbin.cups-browsed}`.
-- **`nvidia-powerd`** SEGV crash-loop → `systemctl disable`d (Dynamic Boost,
-  unsupported on this Blackwell + Arrow-Lake combo).
-- **PCP** `pmcd`/`pmproxy`/`pmie`/`pmlogger` (orphaned `rc`-state SysV) → masked.
-- **Wi-Fi 7 `iwlmld` MLO** WARNs left as-is (Wi-Fi 7 kept; kernel/firmware residual).
-- Residual i915 DP/PHY modeset errors are upstream, already mitigated (suspend doc).
+## Chassis — ThinkPad T16 Gen 4 (currently diskless)
+
+`21QN005XUS`, AMD **Krackan** APU (`amdgpu`), MediaTek **MT7925** Wi-Fi 7
+(`mt7925e`), Realtek ethernet (`r8169`); s2idle only. Its SSD (and install)
+moved to the P16 2026-07-18. If it gets a disk again:
+`thinkpad-t16-gen4-ubuntu-suspend.md` — platform suspend is healthy; the one
+real failure mode is the gdfuse FUSE freezer wedge (covered by the universal
+guard `provision` installs). amdgpu `ring gfx_0.0.0 timeout` + self-recovery
+lines are app GPU hangs, not suspend-related — don't chase.
