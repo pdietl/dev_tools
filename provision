@@ -410,6 +410,17 @@ fi
 # Always ensure the Go bin dirs are on PATH, even if Go was already installed
 path_additions+=('/usr/local/go/bin' '"$GOPATH"/bin')
 
+# Installs to "$HOME"/.local/bin, which $path_additions already covers.
+if [ -x "$USER_HOME"/.local/bin/uv ]; then
+    echo "  uv: already installed"
+else
+    echo "  uv: installing..."
+    # UV_NO_MODIFY_PATH: this script owns PATH, so the installer must not
+    # edit the shell profiles itself.
+    sudo -u "$SUDO_USER" -- curl -LsSf https://astral.sh/uv/install.sh |
+        sudo -u "$SUDO_USER" -- env UV_NO_MODIFY_PATH=1 sh
+fi
+
 if command -v bazelisk > /dev/null; then
     echo "  Bazelisk: already installed"
 else
