@@ -160,10 +160,12 @@ declare -a packages=(
     docker-ce-cli
     docker-compose-plugin
     dos2unix
+    doxygen
     dpkg-dev
     dwarves
     efibootmgr
     exuberant-ctags
+    fakeroot
     fd-find
     flex
     fonts-dejavu-core
@@ -171,6 +173,7 @@ declare -a packages=(
     gawk
     gcc-multilib
     gdb-multiarch
+    gettext
     gnome-tweaks
     gparted
     graphviz
@@ -185,14 +188,38 @@ declare -a packages=(
     jq
     jsonlint
     lbzip2
-    libcurl4-gnutls-dev
+    libboost-all-dev
+    libbz2-dev
+    libcairo2-dev
+    libcurl4-openssl-dev
     libelf-dev
     libfuse3-dev
+    libgit2-dev
+    libgl1-mesa-dev
+    libglm-dev
+    libglu1-mesa-dev
     libgmp-dev
+    libngspice0-dev
+    libnng-dev
+    libocct-data-exchange-dev
+    libocct-foundation-dev
+    libocct-modeling-algorithms-dev
+    libocct-modeling-data-dev
+    libocct-ocaf-dev
+    libocct-visualization-dev
+    libpoppler-dev
+    libpoppler-glib-dev
+    libprotobuf-dev
+    libsecret-1-dev
+    libspnav-dev
     libsqlite3-dev
     libssl-dev
     libvirt-clients
     libvirt-dev
+    libwxgtk-webview3.2-dev
+    libwxgtk3.2-dev
+    libzint-dev
+    libzstd-dev
     linux-tools-generic
     lua5.1
     luarocks
@@ -218,9 +245,11 @@ declare -a packages=(
     pre-commit
     protobuf-compiler
     pv
+    python3-dev
     python3-pip
     python3-stestr
     python3-venv
+    python3-wxgtk4.0
     qemu-system
     qemu-system-x86
     qemu-user
@@ -233,6 +262,7 @@ declare -a packages=(
     ruby
     ruby-dev
     samba
+    shared-mime-info
     shellcheck
     shfmt
     smbclient
@@ -241,11 +271,13 @@ declare -a packages=(
     sshfs
     sshpass
     strace
+    swig
     texinfo
     tmate
     tmux
     tree
     tshark
+    unixodbc-dev
     usbutils
     uuid
     uuid-dev
@@ -346,9 +378,17 @@ elif dpkg-query -Wf'${db:Status-abbrev}' kicad 2> /dev/null | grep -q '^i'; then
     echo "  KiCad: already installed"
 else
     echo "  KiCad: building from source (30-50 min)..."
-    sudo -u "$SUDO_USER" -- pipx install west > /dev/null 2>&1 || true
+    if ! pipx_out=$(sudo -u "$SUDO_USER" -- pipx install west 2>&1); then
+        echo "Error: pipx install west failed:" >&2
+        echo "$pipx_out" >&2
+        exit 1
+    fi
     kicad_ws=$USER_HOME/Repos/kicad_top
     installUser "$kicad_ws"
+    # A .deb left behind by an earlier failed run would otherwise sit next to
+    # this run's output; with two versions present the post-build glob below
+    # matches both and `apt-get install` errors on the ambiguity.
+    rm -f "$kicad_ws"/kicad-source-to-deb/kicad*_*.deb
     # pipx puts `west` in ~/.local/bin, which sudo's secure_path excludes;
     # prepend it inside the subshell so the bare `west` calls below resolve.
     #
