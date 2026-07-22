@@ -383,33 +383,36 @@ else
         echo "$pipx_out" >&2
         exit 1
     fi
-    kicad_ws=$USER_HOME/Repos/kicad_top
-    installUser "$kicad_ws"
+    kicad_repo=$USER_HOME/Repos/kicad-source-to-deb
     # A .deb left behind by an earlier failed run would otherwise sit next to
     # this run's output; with two versions present the post-build glob below
     # matches both and `apt-get install` errors on the ambiguity.
-    rm -f "$kicad_ws"/kicad-source-to-deb/kicad*_*.deb
-    # pipx puts `west` in ~/.local/bin, which sudo's secure_path excludes;
-    # prepend it inside the subshell so the bare `west` calls below resolve.
-    #
-    # kicad-source-to-deb is not yet published to GitHub, so the clone below
-    # 404s on a machine that doesn't already have it checked out under
-    # $kicad_ws. Once it's pushed this works unattended on a fresh machine too.
-    sudo -H -u "$SUDO_USER" bash -ec "
-        export PATH=\"\$HOME/.local/bin:\$PATH\"
-        cd '$kicad_ws'
+    rm -f "$kicad_repo"/kicad*_*.deb
+    # Everything below runs as the invoking user, so the clone and the several
+    # GB of build tree it produces are owned by them without a chown after the
+    # fact -- one over ~/Repos would recurse into every unrelated checkout
+    # there. pipx puts `west` in ~/.local/bin, which sudo's secure_path
+    # excludes, so it is prepended for the build script's own west calls; the
+    # script bootstraps its workspace under the repo's gitignored work/, so
+    # there is no west init/update to do out here.
+    sudo -H -u "$SUDO_USER" bash -ec '
+        export PATH="$HOME/.local/bin:$PATH"
+        mkdir -p "$HOME/Repos"
+        cd "$HOME/Repos"
         [ -d kicad-source-to-deb ] ||
             git clone https://github.com/pdietl/kicad-source-to-deb.git
-        west init -l kicad-source-to-deb 2>/dev/null || true
-        west update
         cd kicad-source-to-deb
         ./build-kicad-deb.sh
-    "
-    kicad_debs=$(ls -1 "$kicad_ws"/kicad-source-to-deb/kicad*_*.deb 2> /dev/null || true)
+    '
+    kicad_debs=$(ls -1 "$kicad_repo"/kicad*_*.deb 2> /dev/null || true)
     if [ -z "$kicad_debs" ]; then
         echo "Error: KiCad deb files not found!"
         exit 1
     fi
+    # Both .debs are installed in one call on purpose. kicad recommends
+    # kicad-packages3d at exactly its own version, so installing kicad alone
+    # leaves that recommendation unsatisfied; naming both is what makes the
+    # models come from this build rather than from nowhere.
     # shellcheck disable=SC2086
     _apt_get install -y $kicad_debs
     # shellcheck disable=SC2086
@@ -419,7 +422,7 @@ else
     # is passed: the build manifest lists /usr paths (the .deb build prefix),
     # not /usr/local, so the script falls back to its own known-paths list.
     if [ -x /usr/local/bin/kicad ]; then
-        "$kicad_ws"/kicad-source-to-deb/uninstall-usr-local.sh
+        "$kicad_repo"/uninstall-usr-local.sh
     fi
 
     # KiCad pins an absolute prefix into the per-user library table on first
