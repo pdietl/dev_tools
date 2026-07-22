@@ -340,6 +340,59 @@ else
     rm -rf "$tmp"
 fi
 
+if in_wsl; then
+    echo "  KiCad: skipped (WSL)"
+elif dpkg-query -Wf'${db:Status-abbrev}' kicad 2> /dev/null | grep -q '^i'; then
+    echo "  KiCad: already installed"
+else
+    echo "  KiCad: building from source (30-50 min)..."
+    sudo -u "$SUDO_USER" -- pipx install west > /dev/null 2>&1 || true
+    kicad_ws=$USER_HOME/Repos/kicad_top
+    installUser "$kicad_ws"
+    # pipx puts `west` in ~/.local/bin, which sudo's secure_path excludes;
+    # prepend it inside the subshell so the bare `west` calls below resolve.
+    #
+    # kicad-source-to-deb is not yet published to GitHub, so the clone below
+    # 404s on a machine that doesn't already have it checked out under
+    # $kicad_ws. Once it's pushed this works unattended on a fresh machine too.
+    sudo -H -u "$SUDO_USER" bash -ec "
+        export PATH=\"\$HOME/.local/bin:\$PATH\"
+        cd '$kicad_ws'
+        [ -d kicad-source-to-deb ] ||
+            git clone https://github.com/pdietl/kicad-source-to-deb.git
+        west init -l kicad-source-to-deb 2>/dev/null || true
+        west update
+        cd kicad-source-to-deb
+        ./build-kicad-deb.sh
+    "
+    kicad_debs=$(ls -1 "$kicad_ws"/kicad-source-to-deb/kicad*_*.deb 2> /dev/null || true)
+    if [ -z "$kicad_debs" ]; then
+        echo "Error: KiCad deb files not found!"
+        exit 1
+    fi
+    # shellcheck disable=SC2086
+    _apt_get install -y $kicad_debs
+    # shellcheck disable=SC2086
+    rm -f $kicad_debs
+
+    # A prior /usr/local source install shadows /usr/bin on PATH. No manifest
+    # is passed: the build manifest lists /usr paths (the .deb build prefix),
+    # not /usr/local, so the script falls back to its own known-paths list.
+    if [ -x /usr/local/bin/kicad ]; then
+        "$kicad_ws"/kicad-source-to-deb/uninstall-usr-local.sh
+    fi
+
+    # KiCad pins an absolute prefix into the per-user library table on first
+    # run and never revisits it; a stale table yields an empty library list
+    # with no error shown. The glob is safe if it matches nothing (fresh
+    # machine, KiCad never launched): the -d guard skips the loop body, and
+    # rm -f never creates anything, so no root-owned file is left behind.
+    for tbl in "$USER_HOME"/.config/kicad/*/; do
+        [ -d "$tbl" ] || continue
+        rm -f "$tbl"/sym-lib-table "$tbl"/fp-lib-table "$tbl"/design-block-lib-table
+    done
+fi
+
 if command -v aws > /dev/null; then
     echo "  awscli: already installed"
 else
