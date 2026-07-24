@@ -484,6 +484,96 @@ measured (it's the latest change as of this writing).
 
 ---
 
+## Shutdown / reboot: dGPU-teardown hang
+
+A distinct lifecycle event from the four suspend modes above — this is a
+**reboot**, not a suspend — but the same family: a power transition that
+wedges in the GPU path and needs a hard power-off. Kept here because this is
+the machine's canonical GPU-instability writeup.
+
+**Symptom (first seen 2026-07-24):** `sudo reboot` with the lid **closed**
+and two external monitors live on USB-C. Screen went dark (expected), then
+the machine sat powered — keyboard backlight and power LED on — and never
+reset. A forced power-off was the only way out.
+
+**Where it hangs.** The journal for that boot ends cleanly ~8 s into the
+reboot — userspace fully torn down (NetworkManager, logind, slices, all user
+mounts) — and then goes dark as journald itself stops. The machine stayed
+powered ~2.5 min more before the forced off. So the hang is in the **final
+systemd-shutdown → kernel device `.shutdown()` → `reboot(2)` phase**, which
+by construction is past where anything reaches disk. A clean reboot's journal
+ends the same way; the tell is that the machine never reset and left no
+record. This means the cause cannot be read out of the logs directly.
+
+**Soft hang, not a panic.** `crashkernel=` is on the cmdline (kdump armed),
+yet pstore is empty and no dump was written — a panic would have kexec'd the
+capture kernel. So it is a driver stuck in uninterruptible teardown, not a
+crash, consistent with a GPU `.shutdown()` blocking with the framebuffer
+already gone (hence the dark screen).
+
+**Localized to the dGPU display path.** In Discrete mode every scanout engine
+is the nvidia card: `card6` owns `eDP-1` (panel) plus the two USB-C externals
+as native DP-alt (`DP-5`/`DP-6`). Lid closed = panel off, externals live, all
+on the one dGPU; the teardown had to drop active dGPU scanout and the USB-C DP
+links together.
+
+**Ruled out.**
+- *evdi / DisplayLink* — plymouth's reboot splash was seen cycling the four
+  evdi cards, but those are **phantom**: evdi pre-creates four `DVI-I` cards
+  whose connectors read `disconnected`, and no DisplayLink USB device is or
+  was present. plymouth was probing dead cards, not scanning out on them. (A
+  different problem from the *suspend*-time evdi lag under Known residuals.)
+- *ZFS-root unmount / dracut pivot* — late userspace teardown and
+  `dracut-shutdown.service` ExecStop both completed in the journal; nothing
+  points here. (A missing `/run/initramfs/shutdown` binary mid-uptime is
+  normal — dracut only restores it during the shutdown transition.)
+- *FUSE / network* — the GoogleDrive mount unmounted cleanly; network torn
+  down normally.
+
+**Not provable from logs:** the exact failing callback — nvidia dGPU
+`.shutdown()` vs the Thunderbolt/USB4 controller carrying the DP-alt links —
+both live in the same unlogged final phase.
+
+**Aggravating factor — a live driver upgrade earlier the same session.**
+`unattended-upgrades` had bumped the whole NVIDIA stack 595.71.05 → 595.84
+that morning *without a reboot*, so the running kernel module stayed
+595.71.05 while userspace jumped to 595.84 ("NVRM: API mismatch" spam all
+session; gnome-control-center was killed on it). A GPU stack half-swapped
+under a live session is in a poor state to reset cleanly at reboot, and this
+bleeding-edge Blackwell + open kernel module is fragile there to begin with.
+
+### Mitigation: hold the NVIDIA stack out of unattended-upgrades
+
+Repo `apt/52nvidia-unattended-hold`, installed by `provision` (non-WSL) to
+`/etc/apt/apt.conf.d/52nvidia-unattended-hold`. It blacklists the NVIDIA
+stack from the **automatic** path only, so the driver is never live-swapped
+in the background; it now moves solely during a deliberate `apt upgrade` the
+user follows with a reboot. Interactive apt is unaffected, and the file is
+inert on a machine with no NVIDIA packages.
+
+The blacklist entry is **`.*nvidia`**, not `nvidia`: unattended-upgrades
+anchors each entry at the start (`re.match`; it builds an apt pin `/^entry/`),
+so a bare `nvidia` matches only names that *begin* with nvidia and silently
+misses `libnvidia-*`, `xserver-xorg-video-nvidia-*`, and
+`linux-modules-nvidia-*` — the GL/compute and kernel-module halves that are
+the split itself. Verified against u-u's own matching: `.*nvidia` holds 21/21
+installed stack packages, `nvidia` only 8. The header comment in the file
+carries this warning; do not "simplify" the pattern.
+
+Trade-off: background *security* updates to the NVIDIA stack are deferred to
+that manual upgrade. Accepted — a wedged reboot is worse.
+
+### Reducing exposure without the fix
+
+- Rebooting with the lid **open**, or with the USB-C monitors unplugged,
+  leaves the dGPU fewer active scanout/DP links to tear down.
+- The deeper lever is the same Hybrid-vs-Discrete trade the suspend notes
+  weigh: Discrete puts every scanout on the fragile nvidia path (panel
+  included); Hybrid keeps the panel on i915. No data yet on whether Hybrid
+  reboots more reliably here.
+
+---
+
 ## Investigation chronology (for context)
 
 - **Mar–Apr 2026 (Ubuntu 24.04 era)** — first hit the "screen on, no GUI"
@@ -528,3 +618,12 @@ measured (it's the latest change as of this writing).
   deb. See failure mode 4 and its mitigation above. (Same session: redirected
   tailscaled+Slack journal spam, fixed geoclue/cups-browsed apparmor denials,
   disabled the nvidia-powerd SEGV crash-loop, masked orphaned PCP services.)
+- **2026-07-24** — first **reboot** (not suspend) hang: `sudo reboot` with the
+  lid closed and two USB-C externals live wedged in the final GPU-teardown
+  phase — dark screen, power on, hard power-off. Localized to the dGPU display
+  path (all scanout on the nvidia card in Discrete mode); evdi cards cleared as
+  phantom; soft hang, no kdump. Aggravated by an unattended-upgrades NVIDIA
+  bump (595.71.05 → 595.84) applied earlier that session with no reboot,
+  leaving a running-module/userspace split. Mitigation: `apt/52nvidia-
+  unattended-hold` holds the stack from the automatic path. See the
+  "Shutdown / reboot" section above.

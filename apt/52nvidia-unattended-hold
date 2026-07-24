@@ -1,0 +1,30 @@
+// Hold the NVIDIA driver stack out of unattended-upgrades.
+//
+// Why: when unattended-upgrades bumps the NVIDIA stack (driver + userspace +
+// kernel module) in the background, the *running* kernel module stays at the
+// old version while the installed userspace jumps ahead, until the next
+// reboot ("NVRM: API mismatch" in dmesg). On a machine whose dGPU drives the
+// panel, rebooting out of that half-upgraded state can wedge in the GPU
+// shutdown path and never reset, needing a hard power-off. Holding these
+// packages means the driver only ever moves during a deliberate `apt upgrade`
+// that the user follows with a reboot.
+//
+// Scope: this affects only the automatic (unattended-upgrades) path.
+// Interactive `apt upgrade` still updates NVIDIA normally. Inert on machines
+// with no NVIDIA packages installed.
+//
+// Pattern: unattended-upgrades matches each blacklist entry against the
+// package name ANCHORED AT THE START (re.match, and it builds an apt pin
+// `/^<entry>/`). A bare "nvidia" therefore matches only names that BEGIN with
+// nvidia and silently misses libnvidia-*, xserver-xorg-video-nvidia-*, and
+// the linux-{modules,objects,signatures,firmware}-nvidia-* packages — the
+// kernel module and GL/compute halves whose split causes the very hang above.
+// The leading ".*" is load-bearing: keep it. Do NOT "simplify" to "nvidia".
+//
+// Trade-off: background *security* updates to the NVIDIA stack are deferred
+// until a manual upgrade. Accepted: a wedged reboot is worse.
+// Revert: delete this file.
+// Full incident writeup: thinkpad-p16-gen3-ubuntu-suspend.md
+Unattended-Upgrade::Package-Blacklist {
+    ".*nvidia";
+};

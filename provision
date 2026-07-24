@@ -761,6 +761,30 @@ if [ -f "$gdfuse_unit" ] && grep -q '^ExecStart=/usr/bin/google-drive-ocamlfuse'
 fi
 
 # =============================================================================
+banner "NVIDIA driver: hold from unattended-upgrades"
+# =============================================================================
+
+# A background unattended-upgrades bump of the NVIDIA stack leaves the running
+# kernel module older than the freshly-installed userspace until the next
+# reboot; on the P16 (Discrete mode, dGPU drives the panel) rebooting out of
+# that half-upgraded state wedged in the GPU teardown path and needed a hard
+# power-off (2026-07-24). The drop-in blacklists the stack from the automatic
+# path so it only moves during a deliberate `apt upgrade`. Inert without NVIDIA
+# packages; interactive apt is unaffected. See
+# thinkpad-p16-gen3-ubuntu-suspend.md.
+if in_wsl; then
+    echo "  NVIDIA unattended hold: skipped (WSL)"
+else
+    nvidia_hold_dest=/etc/apt/apt.conf.d/52nvidia-unattended-hold
+    if cmp -s "$SCRIPT_DIR"/apt/52nvidia-unattended-hold "$nvidia_hold_dest"; then
+        echo "  NVIDIA unattended hold: already current"
+    else
+        _install -m 0644 "$SCRIPT_DIR"/apt/52nvidia-unattended-hold "$nvidia_hold_dest"
+        echo "  NVIDIA unattended hold: installed"
+    fi
+fi
+
+# =============================================================================
 banner "Suspend mitigations"
 # =============================================================================
 
