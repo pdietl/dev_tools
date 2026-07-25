@@ -404,19 +404,27 @@ else
         cd kicad-source-to-deb
         ./build-kicad-deb.sh
     '
-    kicad_debs=$(ls -1 "$kicad_repo"/kicad*_*.deb 2> /dev/null || true)
-    if [ -z "$kicad_debs" ]; then
+    kicad_deb=$(ls -1 "$kicad_repo"/kicad_*.deb 2> /dev/null || true)
+    models_deb=$(ls -1 "$kicad_repo"/kicad-packages3d_*.deb 2> /dev/null || true)
+    if [ -z "$kicad_deb" ] || [ -z "$models_deb" ]; then
         echo "Error: KiCad deb files not found!"
         exit 1
     fi
-    # Both .debs are installed in one call on purpose. kicad recommends
-    # kicad-packages3d at exactly its own version, so installing kicad alone
-    # leaves that recommendation unsatisfied; naming both is what makes the
-    # models come from this build rather than from nowhere.
+    # kicad and kicad-packages3d are installed in one call on purpose. kicad
+    # recommends kicad-packages3d at exactly its own version, so installing
+    # kicad alone leaves that recommendation unsatisfied; naming both is what
+    # makes the models come from this build rather than from nowhere.
+    #
+    # The build also produces kicad-dbgsym. It is deliberately not installed
+    # (1.9 GB of debug info, useful only under a debugger) but it is kept on
+    # disk: debug files match binaries by build ID, not version, so this .deb
+    # is the only copy of the symbols for the build being installed here.
+    # Investigating a later crash or hang is then one `apt install` away
+    # instead of a 30-50 minute rebuild that would produce non-matching IDs.
     # shellcheck disable=SC2086
-    _apt_get install -y $kicad_debs
+    _apt_get install -y $kicad_deb $models_deb
     # shellcheck disable=SC2086
-    rm -f $kicad_debs
+    rm -f $kicad_deb $models_deb
 
     # A prior /usr/local source install shadows /usr/bin on PATH. No manifest
     # is passed: the build manifest lists /usr paths (the .deb build prefix),
