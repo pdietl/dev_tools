@@ -295,6 +295,7 @@ declare -a packages=(
     wireguard
     wireguard-tools
     wireshark
+    wl-clipboard
     xsel
     yamllint
     zip
