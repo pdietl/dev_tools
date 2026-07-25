@@ -193,12 +193,14 @@ declare -a packages=(
     libcairo2-dev
     libcurl4-openssl-dev
     libelf-dev
+    libfreetype-dev
     libfuse3-dev
     libgit2-dev
     libgl1-mesa-dev
     libglm-dev
     libglu1-mesa-dev
     libgmp-dev
+    libharfbuzz-dev
     libngspice0-dev
     libnng-dev
     libocct-data-exchange-dev
