@@ -16,6 +16,25 @@ return {
           end,
         },
         asm_lsp = {},
+
+        -- Bazel repos compile with a hermetic cross-GCC whose builtin include
+        -- paths (its own libstdc++) only the driver itself knows; clangd must
+        -- be allowed to interrogate it or every std header comes up missing.
+        -- --query-driver is only accepted on the command line, and LazyVim's
+        -- opts merge REPLACES list values, so this restates the clangd
+        -- extra's default cmd rather than just appending one flag.
+        clangd = {
+          cmd = {
+            "clangd",
+            "--background-index",
+            "--clang-tidy",
+            "--header-insertion=iwyu",
+            "--completion-style=detailed",
+            "--function-arg-placeholders",
+            "--fallback-style=llvm",
+            "--query-driver=/home/pdietl/.cache/bazel/**/aarch64-linux-g++",
+          },
+        },
       },
     },
   },
