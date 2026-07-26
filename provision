@@ -489,7 +489,8 @@ else
     tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
     rm /tmp/nvim.tgz
     installUser "$USER_HOME"/.config/nvim
-    _cp -r "$SCRIPT_DIR"/nvim/* "$USER_HOME"/.config/nvim
+    # nvim/. rather than nvim/*: the glob would skip dotfiles (.neoconf.json)
+    _cp -r "$SCRIPT_DIR"/nvim/. "$USER_HOME"/.config/nvim
     _chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.config/nvim
 fi
 
