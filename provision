@@ -802,6 +802,99 @@ else
 fi
 
 # =============================================================================
+banner "Chrome hardware video decode (HEVC via NVDEC)"
+# =============================================================================
+
+# Chrome has no software HEVC decoder, so H.265 video does not play at all
+# unless VA-API hardware decode works. On an NVIDIA GPU that needs two
+# pieces: the NVDEC VA-API driver, and a launch flag, because Chrome ships
+# the VaapiOnNvidiaGPUs feature disabled and that switches off the whole
+# VA-API path on NVIDIA. The packaged driver defaults to the direct (CUDA)
+# backend, which is the one that survives Chrome's GPU sandbox, so no
+# upstream source build is needed. Decode also requires a Wayland session
+# and nvidia_drm.modeset=1 (set by the NVIDIA packaging's modprobe drop-in).
+declare -r CHROME_DESKTOP_SRC=/usr/share/applications/google-chrome.desktop
+declare -r CHROME_DESKTOP_OVERRIDE=/usr/local/share/applications/google-chrome.desktop
+declare -r CHROME_VAAPI_FLAG=--enable-features=VaapiOnNvidiaGPUs
+
+# Gate on a real NVIDIA render node rather than on the machine model: the
+# flag and the driver are both inert without one.
+nvidia_render_node=
+if ! in_wsl; then
+    for node in /dev/dri/renderD*; do
+        [ -e "$node" ] || continue
+        if [ "$(cat "/sys/class/drm/${node##*/}/device/vendor" 2> /dev/null)" = 0x10de ]; then
+            nvidia_render_node=$node
+            break
+        fi
+    done
+fi
+
+if in_wsl; then
+    echo "  Chrome VA-API: skipped (WSL)"
+elif [ -z "$nvidia_render_node" ]; then
+    echo "  Chrome VA-API: skipped (no NVIDIA render node in /dev/dri)"
+elif [ ! -e "$CHROME_DESKTOP_SRC" ]; then
+    echo "  Chrome VA-API: skipped ($CHROME_DESKTOP_SRC not found)"
+else
+    echo "  NVIDIA render node: $nvidia_render_node"
+    _apt_get install -y nvidia-vaapi-driver vainfo
+
+    # The override is a whole-file copy and Chrome upgrades rewrite the
+    # source, so re-derive it from the pristine file on every run.
+    _mkdir -p "$(dirname "$CHROME_DESKTOP_OVERRIDE")"
+    {
+        cat << EOF
+# Installed by dev_tools/provision -- regenerated on every run, do not edit.
+# Chrome ships VaapiOnNvidiaGPUs disabled, which turns off VA-API decode on
+# NVIDIA GPUs; without it H.265 does not play at all, as Chrome has no
+# software HEVC decoder. /usr/local/share precedes /usr/share in
+# XDG_DATA_DIRS, so this copy wins for every user and survives Chrome
+# upgrades. Only desktop-file launches carry the flag, not 'google-chrome'
+# typed at a shell.
+# Revert: rm this file, then update-desktop-database /usr/local/share/applications
+EOF
+        sed "s|^Exec=/usr/bin/google-chrome-stable|& $CHROME_VAAPI_FLAG|" \
+            "$CHROME_DESKTOP_SRC"
+    } > "$CHROME_DESKTOP_OVERRIDE"
+    update-desktop-database /usr/local/share/applications 2> /dev/null || true
+
+    # Compare against the source rather than just asserting the flag appears
+    # somewhere: a Chrome release that renames the binary path flags nothing,
+    # and one that adds a Desktop Action flags all but the new entry.
+    exec_total=$(grep -c '^Exec=' "$CHROME_DESKTOP_SRC" || true)
+    exec_flagged=$(grep -c "^Exec=.*$CHROME_VAAPI_FLAG" "$CHROME_DESKTOP_OVERRIDE" || true)
+    if [ "$exec_flagged" -eq "$exec_total" ]; then
+        echo "  Chrome launcher override: $exec_flagged/$exec_total Exec lines flagged"
+    else
+        # Fatal: this means Chrome's desktop file no longer has the shape the
+        # sed pattern above assumes, so the override is worthless and the
+        # pattern is what needs fixing. Silently shipping a flagless launcher
+        # would look identical to success until a video failed to play.
+        echo "Error: $exec_flagged of $exec_total Exec lines in $CHROME_DESKTOP_OVERRIDE" >&2
+        echo "       carry $CHROME_VAAPI_FLAG. Chrome's desktop file no longer matches" >&2
+        echo "       the Exec= pattern this section rewrites; update it." >&2
+        exit 1
+    fi
+
+    # HEVC entrypoints are enumerated from the GPU at runtime, so this is the
+    # only real check that decode is available; the backend name alone is not.
+    vainfo_out=$(LIBVA_DRIVER_NAME=nvidia vainfo --display drm --device "$nvidia_render_node" 2>&1 || true)
+    hevc_count=$(echo "$vainfo_out" | grep -c VAProfileHEVC || true)
+    if echo "$vainfo_out" | grep -q '\[direct backend\]' && [ "$hevc_count" -gt 0 ]; then
+        echo "  VA-API: direct backend, $hevc_count HEVC profiles"
+    else
+        # Only a warning: this describes the machine's current state rather
+        # than a wrong assumption in this script, and every section below is
+        # independent of it.
+        echo "  WARNING: no usable HEVC decode on $nvidia_render_node -- wanted" >&2
+        echo "           '[direct backend]' and at least one HEVC profile. Check that" >&2
+        echo "           nvidia_drm.modeset=1 and rerun:" >&2
+        echo "           LIBVA_DRIVER_NAME=nvidia vainfo --display drm --device $nvidia_render_node" >&2
+    fi
+fi
+
+# =============================================================================
 banner "Suspend mitigations"
 # =============================================================================
 

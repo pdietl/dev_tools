@@ -86,6 +86,31 @@ repo `hidpi-boot/` via `provision` (DMI-gated): 32 px `grub-mkfont` DejaVu
 Mono + `GRUB_FONT` drop-in, and Plymouth `DeviceScale=2` baked into the
 initramfs. Both installed files self-document their revert steps.
 
+### Chrome HEVC hardware decode
+Chrome has no software HEVC decoder, so H.265 does not play at all unless
+VA-API decode works. `provision`'s "Chrome hardware video decode" section
+installs `nvidia-vaapi-driver` + `vainfo` and regenerates
+`/usr/local/share/applications/google-chrome.desktop` (wins over
+`/usr/share` in `XDG_DATA_DIRS`) adding
+`--enable-features=VaapiOnNvidiaGPUs` — Chrome ships that feature
+disabled, which switches off VA-API on NVIDIA entirely. Ubuntu 26.04's
+packaged driver (0.0.14) already defaults to the direct/CUDA backend, the
+one that survives Chrome's GPU sandbox, so no upstream source build is
+needed. tf4's `operator_station/setup.sh` builds v0.0.16 from source for
+the same fix; that step is redundant on 26.04 and is deliberately not
+ported. Also needs a Wayland session and `nvidia_drm.modeset=1`. Gated on
+an NVIDIA render node being present, so it is inert on the T16 and under
+WSL. The section hard-fails if Chrome's desktop file stops matching the
+`Exec=` pattern it rewrites, and warns (without aborting) if `vainfo`
+reports no usable HEVC.
+
+Verify against the NVIDIA render node (`renderD129` here — the one whose
+`/sys/class/drm/*/device/vendor` is `0x10de`):
+`LIBVA_DRIVER_NAME=nvidia vainfo --display drm --device /dev/dri/renderD129`
+should say `[direct backend]` and list `VAProfileHEVC*`. Note the flag only
+reaches Chrome via the desktop file — `google-chrome` typed at a shell
+does not get it.
+
 ### Deltas vs the previous pdietl-laptop install (as of 2026-07-18)
 - **NVIDIA**: `nvidia-driver-595-open` + `prime-select nvidia` installed
   2026-07-18, BIOS switched Hybrid → Discrete the same day (panel now on
