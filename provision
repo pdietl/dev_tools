@@ -433,11 +433,13 @@ else
     # shellcheck disable=SC2086
     rm -f $kicad_deb $models_deb
 
-    # A prior /usr/local source install shadows /usr/bin on PATH. No manifest
-    # is passed: the build manifest lists /usr paths (the .deb build prefix),
-    # not /usr/local, so the script falls back to its own known-paths list.
+    # /usr/local/bin precedes /usr/bin on PATH, so a KiCad installed there
+    # from source keeps running and the package just installed never does --
+    # with no error from apt or from KiCad to say so. Removing another
+    # administrator's files under /usr/local is not this script's call, so
+    # say it loudly and leave it to them.
     if [ -x /usr/local/bin/kicad ]; then
-        "$kicad_repo"/uninstall-usr-local.sh
+        echo "  KiCad: WARNING /usr/local/bin/kicad shadows the package on PATH; remove it" >&2
     fi
 
     # KiCad pins an absolute prefix into the per-user library table on first
