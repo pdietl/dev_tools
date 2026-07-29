@@ -756,7 +756,14 @@ else
         opam switch list -s 2> /dev/null | grep -qx gdfuse ||
             opam switch create gdfuse ocaml-system
         eval \"\$(opam env --switch=gdfuse --set-switch)\"
-        opam install --deps-only .
+        # --assume-depexts: ocurl's depext metadata wants libcurl4-gnutls-dev,
+        # which conflicts with the libcurl4-openssl-dev the package list
+        # installs. The headers/curl-config are equivalent for building ocurl
+        # (only the runtime TLS backend differs), and every real system dep
+        # (libfuse3-dev, libsqlite3-dev, libgmp-dev, zlib1g-dev, pkg-config)
+        # is in the apt package list, so skip opam's depext handling instead
+        # of letting it flip the curl dev package back and forth.
+        opam install --deps-only --assume-depexts .
         dune build --profile release bin/gdfuse.exe
     "
     _install -m 0755 "$gdfuse_build_dir/src/_build/default/bin/gdfuse.exe" "$GDFUSE_BIN"
