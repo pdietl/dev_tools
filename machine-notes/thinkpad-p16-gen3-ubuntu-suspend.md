@@ -511,11 +511,15 @@ by construction is past where anything reaches disk. A clean reboot's journal
 ends the same way; the tell is that the machine never reset and left no
 record. This means the cause cannot be read out of the logs directly.
 
-**Soft hang, not a panic.** `crashkernel=` is on the cmdline (kdump armed),
-yet pstore is empty and no dump was written — a panic would have kexec'd the
-capture kernel. So it is a driver stuck in uninterruptible teardown, not a
-crash, consistent with a GPU `.shutdown()` blocking with the framebuffer
-already gone (hence the dark screen).
+**Soft hang or panic: the evidence cannot tell.** `crashkernel=` was on the
+cmdline (kdump armed), pstore is empty and no dump was written — but none of
+that discriminates: the capture kernel was later proven to kexec and wedge
+without writing or printing anything (see "kdump is disabled"), a DRAM
+pstore record would not have survived the forced power-off, and
+`kernel.panic` was 0, so a panicked machine would have sat powered and dark
+exactly as observed. A driver stuck in uninterruptible teardown — a GPU
+`.shutdown()` blocking with the framebuffer already gone (hence the dark
+screen) — remains the simplest fit for a stop in this phase.
 
 **Localized to the dGPU display path.** In Discrete mode every scanout engine
 is the nvidia card: `card6` owns `eDP-1` (panel) plus the two USB-C externals
@@ -580,6 +584,254 @@ that manual upgrade. Accepted — a wedged reboot is worse.
 
 ---
 
+## Idle hang: docked, lid closed, dGPU externals live
+
+A third lifecycle event in the same family as the reboot hang above —
+neither a suspend nor a reboot, but a power transition inside the dGPU
+display path.
+
+**Symptom (first seen 2026-07-25):** machine idle, lid closed, two 4K USB-C
+DP-alt externals live. The monitors stayed lit showing a frozen image;
+unplugging everything and opening the lid gave a black panel. It never
+suspended afterwards and needed a forced power-off.
+
+**Where it stops.** The journal ends mid-second and nothing follows — not
+the 10-minute `sysstat-collect`, not `cron`, not `logrotate`. Everything
+stopped being persisted at once, ~40 min before the forced power-off. No
+kernel message precedes it: no Xid, no i915 error, no PCIe AER, no NVMe
+timeout, no hung-task warning. The tell that this is system-wide rather
+than a compositor freeze is the silence of the periodic timers, not any
+error.
+
+**Not resource exhaustion.** The `sar` sample from 2.5 min earlier has the
+machine idle and healthy — ~27 % of 122 GiB used, zero swap-out, load 0.13,
+no blocked tasks, 98 % idle CPU. The stop was sudden, not a degradation.
+
+**Panic or soft hang: indistinguishable in hindsight.** pstore was empty
+and no vmcore was written, but neither absence carries weight: kdump was
+later proven structurally unable to save (see below), a DRAM pstore record
+would not have survived the forced power-off, and `kernel.panic` was still
+0 at the time, so a panicked machine would also have sat wedged with lit
+screens. The capture stack below exists to remove exactly this ambiguity.
+
+**Frozen-but-lit is a hung modeset.** A CRTC keeps scanning out its last
+framebuffer when nothing updates it, so monitors holding a still image is
+what an atomic commit that never completes looks like. The final line
+written is a Wayland client's swapchain going `VK_ERROR_OUT_OF_DATE_KHR` —
+an output reconfiguration beginning on an otherwise idle desktop, 16 min
+after the last window interaction.
+
+**Two candidate triggers, neither provable from the logs.**
+- *A display power transition on the USB-C DP links.* Same topology as the
+  reboot hang: Discrete mode, so `card6` owns `eDP-1` plus `DP-5`/`DP-6`;
+  lid closed, panel off, externals live. GNOME's idle blank disables those
+  same CRTCs and `idle-delay` is 900 s, which places a blank within a
+  minute or so of the stop. GNOME does not log blanking, so the timing is
+  consistent rather than confirmed.
+- *NVIDIA VA-API decode.* `nvidia-vaapi-driver` and the Chrome desktop
+  override adding `--enable-features=VaapiOnNvidiaGPUs` went in ~3 h
+  earlier, and the browser session running at the time was the first with
+  NVDEC decode active. This cannot be the whole story — the reboot hang
+  predates it — but it is a live second path into the same stack.
+
+**Why nothing more can be said:** a wedged machine cannot write its own
+journal, so neither the failing callback nor even whether the kernel
+hard-locked or merely blocked on I/O survives the reset. Closing that gap
+is what the next section is for.
+
+---
+
+## Crash capture
+
+Both hangs above left nothing behind, structurally: a machine that has
+stopped making progress cannot flush its journal, and a forced power-off
+then erases whatever was held in RAM. Four mechanisms are installed so the
+next one is recorded. All reversible; each installed file states its own
+revert steps.
+
+Flushing the journal harder is deliberately *not* among them. Entries reach
+the mmap'd journal file immediately and land on disk at ZFS txg commit, so
+the exposure from deferred `fsync` is seconds — and when the write path is
+what wedged, syncing more often cannot complete either.
+
+| | Mechanism | Files | Fires on |
+|---|---|---|---|
+| 1 | Panic triggers, turning a silent wedge into a panic — and so into a pstore record and a self-reboot | `/etc/sysctl.d/60-crash-capture.conf` | tasks stuck in D state, or a CPU spinning with IRQs off |
+| 2 | iTCO hardware watchdog | `/etc/default/grub.d/watchdog.cfg`, `/etc/systemd/system.conf.d/10-watchdog.conf` | PID 1 stops petting — a wedge nothing else detects |
+| 3 | panic dmesg tail into UEFI NVRAM (`efi_pstore`) | `/etc/default/grub.d/pstore.cfg` | panic/oops; archived to `/var/lib/systemd/pstore/` on the next boot |
+| 4 | netconsole stream off the machine | `/etc/modules-load.d/netconsole.conf`, `/etc/NetworkManager/dispatcher.d/50-netconsole` | every printk, in real time |
+
+**Read crash records from `/var/lib/systemd/pstore/`, not `/sys/fs/pstore`.**
+`systemd-pstore.service` archives and deletes everything in the mount within
+seconds of boot (which also keeps the EFI variable store from filling). An
+empty `/sys/fs/pstore` after a crash means nothing until the archive has
+been checked. EFI dmesg records arrive as ~1 KiB parts that systemd groups
+into per-timestamp directories, each with a reassembled `dmesg.txt`.
+
+**The panic chain is verified end to end (2026-07-26):** a deliberate sysrq
+panic self-rebooted in exactly 60 s with no watchdog involvement, and the
+next boot's archive held the full `Panic#1` record — banner, sysrq
+backtrace and tail. (The sysrq trigger works despite `kernel.sysrq=176`
+lacking the `SYSRQ_ENABLE_DUMP` bit, because writes to
+`/proc/sysrq-trigger` bypass the mask.)
+
+### kdump is disabled — a broken capture kernel is worse than none
+
+**Do not re-enable kdump without first fixing the capture kernel.** A
+deliberate `echo c > /proc/sysrq-trigger` kexec'd into it, and it then wrote
+nothing, printed nothing to the console, and never rebooted; the machine had
+to be recovered with a forced power-off after 15 minutes.
+
+That failure is not neutral, it is destructive. A loaded crash kernel is
+entered *before* `kmsg_dump()` in the panic path, so when it hangs, no
+pstore record of the panic gets written on any backend — and the machine
+then needs a power-button hold. An enabled-but-broken kdump therefore
+intercepts the panic and suppresses the evidence that would otherwise have
+survived. With `USE_KDUMP=0` the panic instead runs the full dump path and
+falls through to `kernel.panic=60`. **Verified 2026-07-26: a sysrq panic
+self-reboots in exactly 60 s, unattended.**
+
+What is known: the kexec itself works (the screen blanked ~10 s in, which is
+the capture kernel taking over the display) and the dump target below is
+sound. What is unknown is anything about why the capture kernel stops,
+because it produced no output on any channel. Each diagnostic attempt costs
+a panic and a forced power-off, so this is not worth chasing while
+`efi_pstore` and netconsole cover the same ground.
+
+### Dump target: dedicated ext4 partition
+
+kdump reported `ready to kdump` for a long time while being **structurally
+unable to save anything**. `/var/crash` lived on the encrypted ZFS root, and
+the capture initrd — which is initramfs-tools, not the dracut initrd the
+machine actually boots from — carries `zfs.ko` but no `zpool`/`zfs`
+userspace, no zfs-import units and no `cryptsetup`. It could never import or
+unlock rpool, so it could never reach `/var/crash`. Nothing in its output
+said so.
+
+Fixed by giving it a target that needs no pool and no key. `nvme0n1p3` was an
+8 GiB `/dev/urandom`-keyed plain dm-crypt swap device sitting at 0 B used
+between bpool and rpool; with 122 GiB of RAM and no hibernation it was doing
+nothing. It is now the dump partition, and the machine runs swapless.
+
+    nvme0n1p1   1 GiB   vfat  /boot/efi
+    nvme0n1p2   2 GiB   zfs   bpool
+    nvme0n1p3   8 GiB   ext4  kdump      <- was encrypted swap
+    nvme0n1p4   1.8 TiB zfs   rpool
+
+**rpool was never touched, and could not have been.** ZFS has no shrink at
+any level: labels L2/L3 live at the end of the vdev and the label records its
+`asize`, so truncating that partition destroys the pool. Booting a live USB
+does not change this — the only way to shrink rpool is backup, destroy,
+recreate, restore.
+
+Why ext4 specifically, and not a "better" filesystem: it is the only
+journalled filesystem compiled into the kernel (`CONFIG_EXT4_FS=y`). XFS,
+btrfs, f2fs, jfs and nilfs2 are all modules and **none are present in the
+capture initrd**; adding one puts a module in the exact path that must not
+fail. vfat is built in but caps files at 4 GiB with no journal. Decisively:
+**the capture initrd contains no fsck of any kind**, so the dump filesystem
+must always mount without repair.
+
+That last point drives the mount policy, which matters more than the
+filesystem choice: the partition is **`noauto` and stays unmounted in normal
+operation**, so the capture kernel meets a clean filesystem every time and
+never depends on journal replay. Mount `/mnt/kdump` by hand to read dumps.
+
+Made with `mkfs.ext4 -m 0 -T largefile` — no root reserve, and ~8 K inodes
+instead of ~524 K, since this volume holds a handful of huge files. Worth
+~600 MB of the 8 GiB. The journal is kept deliberately: it protects a
+partially written dump if the watchdog resets the machine mid-write.
+
+`KDUMP_COREDIR` stays `/var/crash` and resolves differently in each context —
+on rpool for the running system's lock/stamp files, and on the dump partition
+for the capture kernel, which mounts it as its root. Dumps therefore appear
+at `/mnt/kdump/var/crash/<stamp>/`.
+
+**A vmcore on an unencrypted partition is a disclosure surface.** `-d 31`
+excludes user pages, but kernel memory is where the ZFS encryption key lives
+while the pool is unlocked. Anyone with physical access to the SSD can read a
+dump that the encrypted root would otherwise have protected. Treat dumps as
+short-lived: pull what you need, then wipe.
+
+Constraints worth knowing before changing any of it:
+
+- **The watchdog timeout is a lower bound on recovery, not the actual one.**
+  The Intel TCO timer is two-stage: the configured value elapses once to
+  raise the condition and again before the platform asserts reset, so the
+  real worst case is roughly double. A 600 s setting was observed not to
+  reset a wedged machine within 15 minutes, which is what that doubling
+  looks like. Now set to 120 s. The ceiling for a single stage is 614 s.
+- **`iTCO_wdt` must be loaded from the initramfs, not `modules-load.d`.**
+  The kernel package blacklists it in a kernel-versioned
+  `/lib/modprobe.d/blacklist_linux_*.conf` (replaced on every kernel update,
+  so never edit it), and `systemd-modules-load` honours that denylist and
+  silently skips the module. Independently, systemd opens `/dev/watchdog`
+  during early startup — before `systemd-modules-load` runs — and if it is
+  absent it logs `Failed to open any watchdog device before the initial
+  transaction completed` and never retries for that boot. `rd.driver.pre=`
+  solves both: it is handled in the initramfs by a plain `modprobe` with no
+  `--use-blacklist`, early enough that PID 1 finds the device. A blacklist
+  only suppresses alias-driven autoloading; an explicit request by module
+  name still works, which is why loading it by hand appears to work and
+  proves nothing about the next boot.
+- **`hung_task_timeout_secs` is raised to 300 s from its 120 s default.**
+  FUSE and network mounts can legitimately hold a task in D state for a
+  couple of minutes, and panicking on that trades a recoverable stall for a
+  reboot. A real deadlock never clears.
+- **ramoops cannot work on this machine; do not bring it back.** The
+  firmware zeroes all of DRAM during POST after a *dirty* reset — panic
+  `emergency_restart()`, watchdog, power-button — and preserves it only
+  across a clean reboot. Established by experiment: a reserved region came
+  back byte-identical (headers, then a whole shutdown record) across clean
+  reboots, and uniformly zero-filled after a panic reset, while stopwatch
+  timing proved the panic path itself ran to completion. Uniform zeros are
+  the DDR5 ECC-init scrub, and clean-reboot-only survival means reserved
+  DRAM dies on exactly the resets a crash produces. No kernel setting can
+  change this; it happens before the kernel gets control.
+- **The panic write path itself is sound and proven** — kmsg dump, deflate,
+  pstore write and next-boot readout all verified end to end. Only the
+  storage medium was wrong.
+- **`pstore.kmsg_bytes` is capped at 16 K** because the EFI variable store
+  is small (244 K total, ~65 K free on this firmware) and each dump part
+  costs a ~1 KiB variable. 16 K of dmesg tail still holds the panic banner
+  and backtrace. systemd-pstore deletes the variables after archiving, so
+  the store self-cleans between crashes.
+- **netconsole only streams on the receiver's own segment.** It addresses
+  the receiver by MAC, so it cannot ride Tailscale or any routed path. The
+  dispatcher enables the target only while this machine holds a `10.0.x.x`
+  address, and disables it otherwise. This is sufficient because the hangs
+  happen docked, and docked is that segment.
+
+The receiver lives on **pdietl-thinkstation** (`10.0.100.3`,
+`d8:43:ae:eb:ca:61`): `netconsole-receiver.service` writes timestamped
+lines to `/var/log/netconsole/pdietl-laptop.log`, capped at 20 rotations of
+1 GiB by `/etc/logrotate.d/netconsole` and checked hourly by
+`netconsole-logrotate.timer`. Its `/var/log/netconsole` is created by
+`/etc/tmpfiles.d/netconsole.conf`, not by `LogsDirectory=`, because systemd
+opens `StandardOutput=append:` before it creates a unit's `LogsDirectory`.
+
+The prepended timestamp is **arrival time on the receiver**, not emission
+time; netconsole's extended format carries the kernel's own sequence number
+and monotonic clock inside each message. They are different clocks — do not
+correlate them as one.
+
+### Verification still owed
+
+Configured but unproven, and an unproven capture path is worse than none:
+it makes the next hang look instrumented when it is not.
+
+- **netconsole has only been proven as far as the NIC** (target enabled,
+  `transmit_errors` zero) and the receiver only over a userspace datagram.
+  The L2 hop can only be tested while docked: check that the dispatcher
+  logged a target, then confirm lines arrive on the receiver.
+
+One behaviour to watch on the first long suspend: `iTCO_wdt` carries
+`suspend_noirq`/`resume_noirq` hooks that stop the counter across sleep, so
+an armed watchdog should not reset a suspended machine — but confirm it
+once rather than assume it.
+
+---
+
 ## Investigation chronology (for context)
 
 - **Mar–Apr 2026 (Ubuntu 24.04 era)** — first hit the "screen on, no GUI"
@@ -633,3 +885,53 @@ that manual upgrade. Accepted — a wedged reboot is worse.
   leaving a running-module/userspace split. Mitigation: `system/apt/52nvidia-
   unattended-hold` holds the stack from the automatic path. See the
   "Shutdown / reboot" section above.
+- **2026-07-25** — second hang in two days on the same topology (docked, lid
+  closed, two USB-C externals on the dGPU), this time **spontaneous while
+  idle** rather than during a lifecycle transition: monitors frozen but lit,
+  no suspend afterwards, forced power-off. Ruled out memory/swap/CPU/IO from
+  the last `sar` sample, DisplayLink (evdi cards phantom), NVRM API mismatch,
+  and thermal; the BERT record present at boot is stale and predates the
+  event. Neither candidate trigger — an idle-blank modeset on the USB-C DP
+  links, or the NVIDIA VA-API decode path enabled ~3 h earlier — is provable
+  from the logs, because the machine stops writing them. Response was to
+  instrument rather than guess: kdump panic triggers, iTCO watchdog, ramoops
+  and a netconsole stream to pdietl-thinkstation. See "Idle hang" and "Crash
+  capture" above; three verification steps are still owed there.
+- **2026-07-26** — preparing to prove kdump revealed it had never been able to
+  work here: `/var/crash` sits on the encrypted ZFS root and the capture
+  initrd has no zfs userspace and no cryptsetup, so it could not reach the
+  target it reported being ready to write. Removed swap entirely (122 GiB RAM,
+  no hibernation) and converted its 8 GiB partition into a plain ext4 dump
+  target, with `KDUMP_CMDLINE` booting the capture kernel there rather than at
+  rpool — no pool import, no key, no filesystem module. rpool was untouched
+  and cannot be shrunk regardless. See "Dump target" above.
+  A deliberate sysrq panic that evening then showed the capture kernel is
+  broken independently of its target: it kexec'd, wrote nothing, printed
+  nothing and never rebooted. kdump disabled as a result — see "kdump is
+  disabled" above for why leaving it on is actively harmful. The watchdog
+  also failed to recover the machine inside 15 minutes at a 600 s setting,
+  consistent with the TCO's two-stage timer doubling it; now 120 s. The
+  forced power-off invalidated the firmware's memory training, so the next
+  POST did a full retrain (several minutes, keyboard LED activity); both
+  DIMMs re-detected at full size and speed with no EDAC or BERT entries.
+- **2026-07-26 (later)** — panics kept leaving `/sys/fs/pstore` empty even
+  with kdump out of the way, and the ramoops region came up valid at the
+  same address every boot. Bisected the chain with three cheap experiments
+  instead of more crash tests: zone headers survived a clean reboot
+  (`ramoops.dyndbg=+p` made the probe verdicts visible); a shutdown-reason
+  dump (`max_reason=4` for one reboot) was written, survived POST and was
+  archived — proving write path, persistence and readout end to end; then a
+  stopwatch on the next sysrq panic showed the machine self-reboot at
+  exactly 60 s (`kernel.panic` works; the watchdog was never what reset it)
+  while the probe reported every zone `sig = 0x00000000`. Verdict: the
+  firmware zeroes DRAM after dirty resets and ramoops can never hold a
+  crash record here. Also caught `systemd-pstore` archiving-and-emptying
+  the mount within seconds of boot, which had made earlier checks look like
+  failures. Replaced ramoops with `efi_pstore` (UEFI NVRAM survives any
+  reset), capped `kmsg_bytes` to fit the small variable store. Verified the
+  same morning: one more sysrq panic self-rebooted in 60 s and the archive
+  held the full Panic record, with the variable store cleaned afterwards.
+  Two side findings while eliminating suspects: this kernel builds
+  only the dmesg pstore front-end (no console/pmsg/ftrace), and the panic
+  notifier chain here is six benign entries — nothing that can hang before
+  the dump.

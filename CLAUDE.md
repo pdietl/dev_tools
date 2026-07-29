@@ -87,6 +87,41 @@ The repo `system/suspend/p16-gen3/` set was applied to this install 2026-07-18
 `gdfuse-suspend-guard` and repo `system/journal-hygiene/` carried over from the
 T16 era (applied 2026-07-12).
 
+### Crash capture (applied 2026-07-25)
+Two hard hangs in two days (2026-07-24 reboot teardown, 2026-07-25 idle),
+both docked with the lid closed and two USB-C externals on the dGPU, both
+leaving **no log at all** — a wedged machine cannot flush its own journal.
+Four capture mechanisms are now live, none of them in `provision` (they are
+hand-applied live-system changes, each file self-documenting its revert):
+panic triggers (`/etc/sysctl.d/60-crash-capture.conf`), the iTCO hardware
+watchdog, panic dmesg into UEFI NVRAM via `efi_pstore`, and a netconsole
+stream to **pdietl-thinkstation** (`10.0.100.3`) capped at 20 GB. Crash
+records surface in `/var/lib/systemd/pstore/` (systemd archives and empties
+`/sys/fs/pstore` seconds after boot). **ramoops was tried first and can
+never work on this machine** — the firmware zeroes DRAM during POST after
+any dirty reset, exactly the resets a crash produces — so don't resurrect
+it.
+
+kdump had been reporting `ready to kdump` while unable to save anything: its
+capture initrd cannot import or unlock the encrypted ZFS root. **The machine
+is now swapless** (122 GiB RAM, no hibernation) and `nvme0n1p3` — formerly
+8 GiB of encrypted swap — is a plain ext4 partition labelled `kdump`, kept
+`noauto` at `/mnt/kdump`. rpool itself was not resized and cannot be: ZFS
+has no shrink.
+
+**kdump is nonetheless disabled** (`USE_KDUMP=0`): a deliberate sysrq panic
+showed the capture kernel hangs regardless of target — no dump, no console
+output, no reboot. That is destructive rather than merely useless: a loaded
+crash kernel is entered before `kmsg_dump()`, so its hang also suppresses
+the pstore record. Do not re-enable it without fixing the capture kernel
+first. Evidence now rides on efi_pstore + netconsole; `kernel.panic=60` is
+verified to self-reboot a panicked machine in exactly 60 s.
+
+Details, constraints and the verification steps still owed are in
+`thinkpad-p16-gen3-ubuntu-suspend.md` under "Crash capture". **Read that
+before changing the watchdog timeout, `hung_task_timeout_secs`, or the dump
+partition's filesystem** — each has a non-obvious constraint behind it.
+
 ### Boot-time HiDPI text (applied 2026-07-18)
 GRUB and Plymouth (including the disk-decryption prompt) render on the
 panel's native 3840x2400 (~260 DPI) and were unreadably small. Fixed by
