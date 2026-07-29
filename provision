@@ -1,7 +1,12 @@
 #!/bin/bash
 
-set -eux
+set -eu
 set -o pipefail
+
+# set -e aborts silently from deep inside a 1000-line script; say where.
+# (xtrace was dropped on purpose: it multiplied the log ~50x, echoing whole
+# captured web pages every time a $(curl ...) landed in a variable.)
+trap 'echo "provision: FAILED at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 SCRIPT_SRC=${BASH_SOURCE[0]}
 # Resolve $SCRIPT_SRC until the file is no longer a symlink.
@@ -33,7 +38,12 @@ installUser() {
     local file_to_copy
     dest_dir=$1
     file_to_copy=${2:-}
-    _mkdir -p "$dest_dir"
+    # Create the chain AS the user: a root mkdir -p leaves every intermediate
+    # directory it creates root-owned, and the chown below only walks
+    # $dest_dir itself. On a fresh machine that turned ~/.config root-owned
+    # (created en route to ~/.config/nvim) and broke every later tool that
+    # writes there as the user.
+    sudo -u "$SUDO_USER" mkdir -p "$dest_dir"
     _chown -R "$SUDO_USER":"$SUDO_USER" "$dest_dir"
     if [ -n "$file_to_copy" ]; then
         _install --owner "$SUDO_USER" --group "$SUDO_USER" -t "$dest_dir" "$file_to_copy"
@@ -78,6 +88,13 @@ if [ "${ID:-}" != "ubuntu" ] || [ "${VERSION_ID:-}" != "26.04" ]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+
+# Standard per-user skeleton, created as the user before any tool section can
+# create one of these as root en route to a deeper path. On a fresh machine a
+# root-owned ~/.config (made while installing ~/.config/nvim) later killed the
+# uv installer, which could not create ~/.config/uv as the user. Existing
+# directories are left untouched.
+sudo -u "$SUDO_USER" mkdir -p "$USER_HOME"/{.config,.local/bin,.local/share,.local/state}
 
 # Preseed wireshark to allow non-root capture so the 'wireshark' group is created
 echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections
@@ -517,7 +534,8 @@ else
     _wget "https://go.dev/dl/$latest"
     rm -rf /usr/local/go
     tar -C /usr/local -xzf "$latest"
-    _mkdir -p "$USER_HOME"/go/{bin,pkg,src}
+    # As the user: a root mkdir leaves ~/go root-owned and unwritable as GOPATH.
+    sudo -u "$SUDO_USER" mkdir -p "$USER_HOME"/go/{bin,pkg,src}
     rm "$latest"
     echo "  Go: $(/usr/local/go/bin/go version)"
 fi
