@@ -1,0 +1,34 @@
+# Installed to ~/.config/systemd/user/ by dev_tools/provision
+# (dotfiles/google-drive-ocamlfuse.service) and enabled via the
+# default.target.wants symlink provision creates next to it.
+# Keeps ~/GoogleDrive mounted with the google-drive-ocamlfuse that provision
+# builds from upstream. Inert until the one-time OAuth setup has been done
+# (ConditionPathExists below; provision prints the recipe at the end of a run).
+# The suspend guard (system/suspend/gdfuse-suspend-guard) restarts this unit
+# by name after aborting a stalled FUSE connection -- keep the name stable.
+# Revert: systemctl --user disable --now google-drive-ocamlfuse.service,
+# then delete this file and the wants symlink.
+
+[Unit]
+Description=Google Drive FUSE mount at %h/GoogleDrive
+# Written by the one-time headless OAuth flow; until it exists the unit is
+# skipped (condition), not failed.
+ConditionPathExists=%h/.gdfuse/default/state
+
+[Service]
+Type=exec
+# Clear any stale mount left by a crash ("transport endpoint is not
+# connected"), then make sure the mountpoint exists.
+ExecStartPre=-/usr/bin/fusermount3 -uz %h/GoogleDrive
+ExecStartPre=/usr/bin/mkdir -p %h/GoogleDrive
+# gdfuse >= 0.9 always runs in the foreground (libfuse -f is hardwired).
+ExecStart=/usr/local/bin/google-drive-ocamlfuse -label default %h/GoogleDrive
+ExecStop=/usr/bin/fusermount3 -u %h/GoogleDrive
+# Remounts after a crash and after the suspend guard aborts a stalled
+# connection pre-sleep. 10 s spacing keeps the default start-rate limit
+# (5 starts / 10 s) from ever tripping while the network is down.
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

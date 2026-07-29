@@ -8,36 +8,41 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
 
 ## What this repo is / how it deploys
 
-- **`provision`** — the installer (Bash, run with `sudo`; uses `$SUDO_USER`).
-  **Copies** the dotfiles here into the invoking user's `$HOME` via
+- **`provision`** — the installer (Bash, run with `sudo`; uses `$SUDO_USER`),
+  the only top-level script. **Copies** the files here into place via
   `install`/`installUser` (**not** symlinks/stow), installs apt + vendor-`.deb`
   packages, udev rules, etc. Ported to Ubuntu 26.04 (2026-06). Re-runnable.
   `in_wsl()`-aware.
-- **Dotfiles** (copied by `provision`): `vimrc`, `nvim/` (LazyVim), `tmux.conf`,
-  `starship.toml`, `gdbinit`, `nix.conf`, `gitignore_global`, `cscope_maps.vim`,
-  `.editorconfig`, `dedup_paths.sh` (PATH-dedup helper).
-- **`bin/`** — user scripts on `$PATH` (`netinfo`, `do_cscope`, `do_update`,
-  `ntfy`, `wsl_usb_attach`/`detach`, `reset`).
-- **`udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP, picoprobe,
-  WCH-Link, xgecu) plus a rule hiding ZFS pool members from GNOME's dock/Files;
-  see `udev_rules/README.md`.
-- **`suspend/`** — suspend/resume mitigation files `provision` installs:
-  `gdfuse-suspend-guard` (every non-WSL machine) plus per-model sets gated on
-  `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
-  machine-fix notes.
-- **`hidpi-boot/`** — HiDPI boot-display fixes `provision` installs per-model
-  (P16 Gen 3's 3840x2400 panel): 32 px GRUB font drop-in + Plymouth
-  `DeviceScale=2` so the GRUB menu and disk-decryption prompt are readable.
-- **`journal-hygiene/`** — `provision`-installed redirects for the chattiest
-  desktop loggers (tailscaled, Slack, LocalSearch) into their own size-capped
-  log files (`/var/log/tailscaled.log`, `~/.local/state/{slack,localsearch}/`),
-  plus an hourly logrotate timer override so the size caps actually bind, and
-  a journald drop-in (20G persistent cap, 256M files, per-service flood
-  backstop of 1000 msgs/10s).
-  Also excludes `mnt` dirs from LocalSearch indexing (basename glob — absolute
-  paths aren't matched) so the indexer stays off network-FUSE mounts.
-- **`sysmon.sh`** — 1 Hz system monitor (screen + file logging).
-- **Machine-fix notes** live as top-level markdown, one per machine:
+- **`dotfiles/`** — everything `provision` copies into the invoking user's
+  `$HOME`: `vimrc`, `nvim/` (LazyVim), `tmux.conf`, `starship.toml`, `gdbinit`,
+  `nix.conf`, `gitignore_global`, `cscope_maps.vim`, `dedup_paths.sh`
+  (PATH-dedup helper), and `google-drive-ocamlfuse.service` (auto-mount user
+  unit, see below). The repo's own `.editorconfig` stays at the top level.
+- **`bin/`** — user scripts copied to `~/bin` (on `$PATH`): `netinfo`,
+  `do_cscope`, `do_update`, `ntfy`, `wsl_usb_attach`/`detach`, `reset`,
+  `sysmon.sh` (1 Hz system monitor, screen + file logging).
+- **`system/`** — everything `provision` installs outside `$HOME`:
+  - **`system/udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP,
+    picoprobe, WCH-Link, xgecu) plus a rule hiding ZFS pool members from
+    GNOME's dock/Files; see `system/udev_rules/README.md`.
+  - **`system/apt/`** — apt drop-ins (NVIDIA unattended-upgrades hold).
+  - **`system/suspend/`** — suspend/resume mitigations: `gdfuse-suspend-guard`
+    (every non-WSL machine) plus per-model sets gated on
+    `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
+    machine-fix notes.
+  - **`system/hidpi-boot/`** — HiDPI boot-display fixes installed per-model
+    (P16 Gen 3's 3840x2400 panel): 32 px GRUB font drop-in + Plymouth
+    `DeviceScale=2` so the GRUB menu and disk-decryption prompt are readable.
+  - **`system/journal-hygiene/`** — redirects for the chattiest desktop
+    loggers (tailscaled, Slack, LocalSearch) into their own size-capped log
+    files (`/var/log/tailscaled.log`, `~/.local/state/{slack,localsearch}/`),
+    plus an hourly logrotate timer override so the size caps actually bind,
+    and a journald drop-in (20G persistent cap, 256M files, per-service flood
+    backstop of 1000 msgs/10s).
+    Also excludes `mnt` dirs from LocalSearch indexing (basename glob —
+    absolute paths aren't matched) so the indexer stays off network-FUSE
+    mounts.
+- **`machine-notes/`** — machine-fix notes, one markdown file per machine:
   `thinkpad-p16-gen3-ubuntu-suspend.md`, `thinkpad-t16-gen4-ubuntu-suspend.md`.
   Follow that model for new machines.
 
@@ -70,19 +75,19 @@ Intel **BE200** Wi-Fi 7 (`iwlwifi`); Intel **I226-LM** ethernet (`igc`);
 suspend is **s2idle** only. Bleeding-edge silicon — many driver-level journal
 warnings are upstream bugs already mitigated; don't chase them blindly.
 
-### Suspend/resume → `thinkpad-p16-gen3-ubuntu-suspend.md`
+### Suspend/resume → `machine-notes/thinkpad-p16-gen3-ubuntu-suspend.md`
 Canonical doc: four suspend failure modes + mitigations (NVIDIA S0ix, i915
 PSR/DC/power-well kernel params, the igc PTM sleep-hook, and the
 Google-Drive-FUSE `statfs` fix). **Read it before touching suspend.**
-The repo `suspend/p16-gen3/` set was applied to this install 2026-07-18
+The repo `system/suspend/p16-gen3/` set was applied to this install 2026-07-18
 (i915 grub params active after the next reboot). The universal
-`gdfuse-suspend-guard` and repo `journal-hygiene/` carried over from the
+`gdfuse-suspend-guard` and repo `system/journal-hygiene/` carried over from the
 T16 era (applied 2026-07-12).
 
 ### Boot-time HiDPI text (applied 2026-07-18)
 GRUB and Plymouth (including the disk-decryption prompt) render on the
 panel's native 3840x2400 (~260 DPI) and were unreadably small. Fixed by
-repo `hidpi-boot/` via `provision` (DMI-gated): 32 px `grub-mkfont` DejaVu
+repo `system/hidpi-boot/` via `provision` (DMI-gated): 32 px `grub-mkfont` DejaVu
 Mono + `GRUB_FONT` drop-in, and Plymouth `DeviceScale=2` baked into the
 initramfs. Both installed files self-document their revert steps.
 
@@ -118,12 +123,16 @@ does not get it.
   If `nvidia-powerd` starts SEGV-crash-looping, `systemctl disable` it
   (it did on the previous install). Avoid DisplayLink/evdi heads while in
   Discrete mode (multi-second lag; see suspend doc).
-- **gdfuse**: the patched non-blocking-`statfs` build (upstream
-  astrada/google-drive-ocamlfuse **PR #943**, pinned fork commit) is at
-  `/usr/local/bin`, installed by `provision`'s "google-drive-ocamlfuse
-  (patched statfs build)" section (deb + PPA removed, user unit repointed;
-  applied + verified 2026-07-18). The `gdfuse` opam switch exists for
-  rebuilds; bump `GDFUSE_COMMIT` in `provision` to roll the pin.
+- **gdfuse**: the non-blocking-`statfs` fix (our upstream PR #943) is
+  **merged and released in v0.9.1**; `provision` builds that upstream tag
+  to `/usr/local/bin` and installs + enables the auto-mount user unit
+  (`dotfiles/google-drive-ocamlfuse.service` → `~/GoogleDrive`, inert until
+  the one-time OAuth setup whose recipe provision prints after a run). As
+  of 2026-07-29 this machine has drifted from the doc'd state: the PPA deb
+  **0.9.0** (predates the fix) is installed and `/usr/local/bin/...` is
+  absent — the next `provision` run converges (builds v0.9.1, removes
+  deb + PPA). The `gdfuse` opam switch exists for rebuilds; bump
+  `GDFUSE_VERSION`/`GDFUSE_COMMIT` in `provision` to roll the pin.
 - The old install's apparmor Varlink rules, PCP masks, and nvidia-powerd
   disable don't exist here and haven't been needed (no denial storm observed).
 
@@ -132,7 +141,8 @@ does not get it.
 `21QN005XUS`, AMD **Krackan** APU (`amdgpu`), MediaTek **MT7925** Wi-Fi 7
 (`mt7925e`), Realtek ethernet (`r8169`); s2idle only. Its SSD (and install)
 moved to the P16 2026-07-18. If it gets a disk again:
-`thinkpad-t16-gen4-ubuntu-suspend.md` — platform suspend is healthy; the one
+`machine-notes/thinkpad-t16-gen4-ubuntu-suspend.md` — platform suspend is
+healthy; the one
 real failure mode is the gdfuse FUSE freezer wedge (covered by the universal
 guard `provision` installs). amdgpu `ring gfx_0.0.0 timeout` + self-recovery
 lines are app GPU hangs, not suspend-related — don't chase.

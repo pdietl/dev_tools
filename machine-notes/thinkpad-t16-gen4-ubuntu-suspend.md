@@ -90,7 +90,7 @@ still covers every other reader.
 ## Mitigation: `gdfuse-suspend-guard` sleep hook
 
 `/usr/lib/systemd/system-sleep/gdfuse-suspend-guard` — maintained in
-dev_tools at `suspend/gdfuse-suspend-guard`, installed by `provision` on
+dev_tools at `system/suspend/gdfuse-suspend-guard`, installed by `provision` on
 all non-WSL machines (it is hardware-independent), and installed manually
 on this machine 2026-07-12.
 
@@ -182,6 +182,6 @@ journalctl -b 0 -k | grep -E 'ring gfx.*timeout|device wedged'
   11:13. Root-caused the same day; wrote `gdfuse-suspend-guard`, added
   hardware-gated suspend mitigations to `provision`, and created this doc.
 - **2026-07-12 (later)** — while routing journal spam to files
-  (`journal-hygiene/`), found LocalSearch recursively indexes all of
+  (`system/journal-hygiene/`), found LocalSearch recursively indexes all of
   `$HOME` on 26.04 and had the Drive mount in scope — the probable
   in-flight reader above. Excluded `mnt` from its `ignored-directories`.

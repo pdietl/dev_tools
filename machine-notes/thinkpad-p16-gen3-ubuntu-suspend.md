@@ -151,7 +151,7 @@ All reversible. Each file has a header comment explaining itself so a
 future reader of the system finds the rationale in-place.
 
 The installable pieces are maintained in this repo under
-`suspend/p16-gen3/` and applied by `provision` when
+`system/suspend/p16-gen3/` and applied by `provision` when
 `dmidecode -s system-version` reports `ThinkPad P16 Gen 3`. Two deltas
 versus the hand-installed files described below: the repo's
 `igc-ptm-workaround` enumerates igc-bound devices at runtime instead of
@@ -159,7 +159,7 @@ hardcoding the BDF, and on machines whose `/etc/default/grub` doesn't
 already carry the i915 params, provision installs them as a
 `/etc/default/grub.d/i915-suspend.cfg` drop-in instead of editing the main
 file. The failure-mode-4 gdfuse build remains a manual step, but
-`suspend/gdfuse-suspend-guard` (installed by provision on every non-WSL
+`system/suspend/gdfuse-suspend-guard` (installed by provision on every non-WSL
 machine) now backstops it — see that mode's section below.
 
 ### `/etc/modprobe.d/nvidia-s0ix.conf` (new file)
@@ -268,12 +268,16 @@ In BIOS Discrete mode these params protect nothing (i915 scans out no
 display) but cost nothing either — keep them so a return to Hybrid mode
 stays mitigated without remembering this step.
 
-### `google-drive-ocamlfuse` — patched non-blocking `statfs` (fixes mode 4)
+### `google-drive-ocamlfuse` — non-blocking `statfs` (fixes mode 4)
 
-The packaged `google-drive-ocamlfuse` deb is **removed**; a patched build from
-`~/Repos/google-drive-ocamlfuse` is installed at
-`/usr/local/bin/google-drive-ocamlfuse`, and the user unit
-`~/.config/systemd/user/google-drive-ocamlfuse.service` `ExecStart` points there.
+**Status 2026-07-29: the fix landed upstream** — PR #943 merged and released
+as **v0.9.1**. `provision` now builds `/usr/local/bin/google-drive-ocamlfuse`
+from the upstream v0.9.1 tag (no fork involved), removes the PPA deb (the PPA
+ships 0.9.0, which predates the fix), and installs + enables the user unit
+`~/.config/systemd/user/google-drive-ocamlfuse.service`
+(repo: `dotfiles/google-drive-ocamlfuse.service`, mounts `~/GoogleDrive`,
+inert until the one-time OAuth setup provision describes at the end of a run).
+The description below is the original debugging/patch writeup.
 
 Patch (3 files — `src/drive.ml`, `src/driveMetadataRefresh.ml`, `.mli`): `statfs`
 now reads the **in-memory cached** metadata through a new non-blocking
@@ -293,17 +297,19 @@ dynamically links system libs (fuse3/sqlite3/gmp/curl) so it runs without the
 opam switch; the `gdfuse` switch is needed only to **rebuild** (after a `git
 pull`, or to regenerate the patch). The patch is committed on branch
 `nonblocking-statfs` of the `pdietl` fork and submitted upstream as
-astrada/google-drive-ocamlfuse PR #943 (fixes issue #896).
+astrada/google-drive-ocamlfuse PR #943 (fixes issue #896) — merged, released
+in v0.9.1.
 
 Revert: `sudo apt install google-drive-ocamlfuse` and point `ExecStart` back at
-`/usr/bin/google-drive-ocamlfuse`.
+`/usr/bin/google-drive-ocamlfuse` — but note the PPA's 0.9.0 deb reintroduces
+the blocking `statfs`; only do this once the PPA ships ≥ 0.9.1.
 
 Defense-in-depth: the patch only covers `statfs`; any *other* gdfuse
 operation caught in flight when the network dies wedges the freezer the
 same way (seen on the T16 via `fuse_do_getattr`/`fuse_file_read_iter` —
 see `thinkpad-t16-gen4-ubuntu-suspend.md`). The
 `/usr/lib/systemd/system-sleep/gdfuse-suspend-guard` hook (repo:
-`suspend/gdfuse-suspend-guard`) aborts a gdfuse FUSE connection that still
+`system/suspend/gdfuse-suspend-guard`) aborts a gdfuse FUSE connection that still
 has unanswered requests at sleep time, op-agnostically, and remounts after
 resume.
 
@@ -544,7 +550,7 @@ bleeding-edge Blackwell + open kernel module is fragile there to begin with.
 
 ### Mitigation: hold the NVIDIA stack out of unattended-upgrades
 
-Repo `apt/52nvidia-unattended-hold`, installed by `provision` (non-WSL) to
+Repo `system/apt/52nvidia-unattended-hold`, installed by `provision` (non-WSL) to
 `/etc/apt/apt.conf.d/52nvidia-unattended-hold`. It blacklists the NVIDIA
 stack from the **automatic** path only, so the driver is never live-swapped
 in the background; it now moves solely during a deliberate `apt upgrade` the
@@ -624,6 +630,6 @@ that manual upgrade. Accepted — a wedged reboot is worse.
   path (all scanout on the nvidia card in Discrete mode); evdi cards cleared as
   phantom; soft hang, no kdump. Aggravated by an unattended-upgrades NVIDIA
   bump (595.71.05 → 595.84) applied earlier that session with no reboot,
-  leaving a running-module/userspace split. Mitigation: `apt/52nvidia-
+  leaving a running-module/userspace split. Mitigation: `system/apt/52nvidia-
   unattended-hold` holds the stack from the automatic path. See the
   "Shutdown / reboot" section above.

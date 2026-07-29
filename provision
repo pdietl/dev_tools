@@ -490,7 +490,7 @@ else
     rm /tmp/nvim.tgz
     installUser "$USER_HOME"/.config/nvim
     # nvim/. rather than nvim/*: the glob would skip dotfiles (.neoconf.json)
-    _cp -r "$SCRIPT_DIR"/nvim/. "$USER_HOME"/.config/nvim
+    _cp -r "$SCRIPT_DIR"/dotfiles/nvim/. "$USER_HOME"/.config/nvim
     _chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.config/nvim
 fi
 
@@ -564,9 +564,10 @@ else
     echo "  Nix: installing..."
     printf 'n\ny\n' | sh <(curl -L https://nixos.org/nix/install) --daemon 2>&1 | grep -E '^\~\~>|error|warning' | grep -v 'is greater than SYS_UID_MAX' || true
     echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
-    installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/nix.conf"
     touch /etc/.nix-installed
 fi
+# Converge the user-level nix.conf on every run so settings updates deploy.
+installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/dotfiles/nix.conf"
 
 if in_wsl; then
     echo "  Nerd Font: skipped (WSL)"
@@ -611,9 +612,9 @@ if [ -e "/home/$SUDO_USER/.vimrc" ]; then
     echo "  vimrc: already installed"
 else
     echo "  vimrc: installing"
-    _cp "$SCRIPT_DIR"/vimrc "$USER_HOME"/.vimrc
+    _cp "$SCRIPT_DIR"/dotfiles/vimrc "$USER_HOME"/.vimrc
     _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.vimrc
-    installUser "$USER_HOME"/.vim/pack/plugins/start/cscope/plugin/ "$SCRIPT_DIR"/cscope_maps.vim
+    installUser "$USER_HOME"/.vim/pack/plugins/start/cscope/plugin/ "$SCRIPT_DIR"/dotfiles/cscope_maps.vim
     installUser "$USER_HOME"/.vim/spell
 fi
 
@@ -621,7 +622,7 @@ if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
     echo "  tmux.conf: already installed"
 else
     echo "  tmux.conf: installing"
-    _cp "$SCRIPT_DIR"/tmux.conf "$USER_HOME"/.tmux.conf
+    _cp "$SCRIPT_DIR"/dotfiles/tmux.conf "$USER_HOME"/.tmux.conf
     _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux.conf
 fi
 
@@ -672,7 +673,7 @@ else
 [init]
     defaultBranch = main' > "$USER_HOME/.gitconfig"
     _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
-    _cp "$SCRIPT_DIR"/gitignore_global "$USER_HOME"/.gitignore_global
+    _cp "$SCRIPT_DIR"/dotfiles/gitignore_global "$USER_HOME"/.gitignore_global
     _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.gitignore_global
 fi
 
@@ -715,33 +716,37 @@ else
 fi
 
 echo "  udev rules: installing"
-_cp "$SCRIPT_DIR"/udev_rules/* /etc/udev/rules.d/
+_cp "$SCRIPT_DIR"/system/udev_rules/* /etc/udev/rules.d/
 udevadm control --reload
 
 echo "  gdbinit: installing"
-_cp "$SCRIPT_DIR"/gdbinit "$USER_HOME"/.gdbinit
+_cp "$SCRIPT_DIR"/dotfiles/gdbinit "$USER_HOME"/.gdbinit
 _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.gdbinit
 
+declare -r GDFUSE_VERSION=v0.9.1
+
 # =============================================================================
-banner "google-drive-ocamlfuse (patched statfs build)"
+banner "google-drive-ocamlfuse (upstream $GDFUSE_VERSION source build)"
 # =============================================================================
 
-# Built from a pinned fork commit instead of the PPA deb: the fork makes
-# statfs non-blocking (upstream issue #896 / PR #943). A blocking statfs
+# Built from the upstream release tag instead of the PPA deb: the
+# non-blocking-statfs fix (upstream issue #896 / PR #943, ours) landed in
+# v0.9.1, but the PPA still ships 0.9.0, which blocks. A blocking statfs
 # leaves df, GTK file choosers, and some PAM stacks in uninterruptible
 # D-state whenever Drive or the network stalls, which also wedges suspend
-# (the kernel freezer cannot freeze D-state tasks). Once upstream merges
-# the PR and the PPA ships it, drop this section, restore the deb in the
-# package list, and remove /usr/local/bin/google-drive-ocamlfuse + stamp.
-declare -r GDFUSE_REPO=https://github.com/pdietl/google-drive-ocamlfuse
-declare -r GDFUSE_COMMIT=972dab0041ede9dec2abbe81baa4bdb7613fac5e
+# (the kernel freezer cannot freeze D-state tasks). Once the PPA or the
+# archive ships >= 0.9.1, this section can go back to the deb; then remove
+# $GDFUSE_BIN and the stamp file.
+declare -r GDFUSE_REPO=https://github.com/astrada/google-drive-ocamlfuse
+declare -r GDFUSE_COMMIT=67f87d0cd4cc3c8d294f7e97f94ec5249fb00fc9 # = $GDFUSE_VERSION
 declare -r GDFUSE_BIN=/usr/local/bin/google-drive-ocamlfuse
 declare -r GDFUSE_STAMP=/usr/local/share/google-drive-ocamlfuse.commit
+declare -r GDFUSE_UNIT=google-drive-ocamlfuse.service
 
 if [ -x "$GDFUSE_BIN" ] && [ "$(cat "$GDFUSE_STAMP" 2> /dev/null || true)" = "$GDFUSE_COMMIT" ]; then
-    echo "  $GDFUSE_BIN already built from $GDFUSE_COMMIT"
+    echo "  $GDFUSE_BIN already built from $GDFUSE_VERSION ($GDFUSE_COMMIT)"
 else
-    echo "  Building $GDFUSE_COMMIT (as $SUDO_USER, opam switch 'gdfuse')..."
+    echo "  Building $GDFUSE_VERSION ($GDFUSE_COMMIT) (as $SUDO_USER, opam switch 'gdfuse')..."
     gdfuse_build_dir=$(sudo -u "$SUDO_USER" mktemp -d /tmp/gdfuse-build.XXXXXX)
     sudo -H -u "$SUDO_USER" env OPAMYES=1 bash -ec "
         git clone -q '$GDFUSE_REPO' '$gdfuse_build_dir/src'
@@ -757,9 +762,11 @@ else
     _install -m 0755 "$gdfuse_build_dir/src/_build/default/bin/gdfuse.exe" "$GDFUSE_BIN"
     echo "$GDFUSE_COMMIT" > "$GDFUSE_STAMP"
     rm -rf "$gdfuse_build_dir"
+    echo "  NOTE: if the mount was active, restart it to pick up the new binary:"
+    echo "        systemctl --user restart $GDFUSE_UNIT"
 fi
 
-# The fork build replaces the deb; remove it only after the build succeeded
+# This build replaces the deb; remove it only after the build succeeded
 # so a failed build doesn't leave the machine with no gdfuse binary at all.
 if dpkg -s google-drive-ocamlfuse > /dev/null 2>&1; then
     echo "  Removing the PPA deb (superseded by $GDFUSE_BIN)"
@@ -769,14 +776,27 @@ if ls /etc/apt/sources.list.d/*alessandro-strada* > /dev/null 2>&1; then
     add-apt-repository --remove --no-update -y ppa:alessandro-strada/ppa > /dev/null 2>&1
 fi
 
-# A pre-existing user unit may still point at the deb path; converge it.
-gdfuse_unit=$USER_HOME/.config/systemd/user/google-drive-ocamlfuse.service
-if [ -f "$gdfuse_unit" ] && grep -q '^ExecStart=/usr/bin/google-drive-ocamlfuse' "$gdfuse_unit"; then
-    sed -i "s|^ExecStart=/usr/bin/google-drive-ocamlfuse|ExecStart=$GDFUSE_BIN|" "$gdfuse_unit"
-    systemctl --user --machine="$SUDO_USER@.host" daemon-reload || true
-    echo "  NOTE: user unit repointed to $GDFUSE_BIN; restart the service to pick it up:"
-    echo "        systemctl --user restart google-drive-ocamlfuse.service"
+# Auto-mount: a user unit keeps ~/GoogleDrive mounted from login on. The
+# suspend guard installed below restarts this exact unit name after aborting
+# a stalled FUSE connection, and the unit's Restart=always remounts after
+# crashes. A ConditionPathExists keeps it inert until the one-time OAuth
+# setup has been done (recipe printed at the end of the run).
+gdfuse_unit_dir=$USER_HOME/.config/systemd/user
+if cmp -s "$SCRIPT_DIR/dotfiles/$GDFUSE_UNIT" "$gdfuse_unit_dir/$GDFUSE_UNIT"; then
+    echo "  User unit: already current"
+else
+    installUser "$gdfuse_unit_dir" "$SCRIPT_DIR/dotfiles/$GDFUSE_UNIT"
+    echo "  User unit: installed $GDFUSE_UNIT"
 fi
+# Enable without needing the user's session bus: create the same symlink
+# `systemctl --user enable` would.
+installUser "$gdfuse_unit_dir/default.target.wants"
+ln -sfn "../$GDFUSE_UNIT" "$gdfuse_unit_dir/default.target.wants/$GDFUSE_UNIT"
+_chown -h "$SUDO_USER":"$SUDO_USER" "$gdfuse_unit_dir/default.target.wants/$GDFUSE_UNIT"
+# Pick up unit changes now if a session is running; start is a condition-skip
+# no-op until OAuth is set up, and a no-op if already mounted.
+systemctl --user --machine="$SUDO_USER@.host" daemon-reload 2> /dev/null || true
+systemctl --user --machine="$SUDO_USER@.host" start "$GDFUSE_UNIT" 2> /dev/null || true
 
 # =============================================================================
 banner "NVIDIA driver: hold from unattended-upgrades"
@@ -794,10 +814,10 @@ if in_wsl; then
     echo "  NVIDIA unattended hold: skipped (WSL)"
 else
     nvidia_hold_dest=/etc/apt/apt.conf.d/52nvidia-unattended-hold
-    if cmp -s "$SCRIPT_DIR"/apt/52nvidia-unattended-hold "$nvidia_hold_dest"; then
+    if cmp -s "$SCRIPT_DIR"/system/apt/52nvidia-unattended-hold "$nvidia_hold_dest"; then
         echo "  NVIDIA unattended hold: already current"
     else
-        _install -m 0644 "$SCRIPT_DIR"/apt/52nvidia-unattended-hold "$nvidia_hold_dest"
+        _install -m 0644 "$SCRIPT_DIR"/system/apt/52nvidia-unattended-hold "$nvidia_hold_dest"
         echo "  NVIDIA unattended hold: installed"
     fi
 fi
@@ -907,7 +927,7 @@ else
     # machine that mounts google-drive-ocamlfuse.
     echo "  gdfuse suspend guard: installing"
     _install -m 0755 -t /usr/lib/systemd/system-sleep \
-        "$SCRIPT_DIR"/suspend/gdfuse-suspend-guard
+        "$SCRIPT_DIR"/system/suspend/gdfuse-suspend-guard
 
     hw_model=$(dmidecode -s system-version 2> /dev/null || echo unknown)
     case "$hw_model" in
@@ -916,18 +936,18 @@ else
         echo "  $hw_model: applying suspend mitigations"
         reboot_needed=0
         for f in nvidia-s0ix.conf nvidia-resume-speed.conf; do
-            if ! cmp -s "$SCRIPT_DIR/suspend/p16-gen3/$f" "/etc/modprobe.d/$f"; then
-                _install -m 0644 -t /etc/modprobe.d "$SCRIPT_DIR/suspend/p16-gen3/$f"
+            if ! cmp -s "$SCRIPT_DIR/system/suspend/p16-gen3/$f" "/etc/modprobe.d/$f"; then
+                _install -m 0644 -t /etc/modprobe.d "$SCRIPT_DIR/system/suspend/p16-gen3/$f"
                 reboot_needed=1
             fi
         done
         _install -m 0755 -t /usr/lib/systemd/system-sleep \
-            "$SCRIPT_DIR"/suspend/p16-gen3/igc-ptm-workaround
+            "$SCRIPT_DIR"/system/suspend/p16-gen3/igc-ptm-workaround
         # Skip the grub drop-in if the i915 params are already configured
         # (e.g. hand-edited into /etc/default/grub) to avoid duplicates.
         if ! grep -qs 'i915\.enable_psr=0' /etc/default/grub /etc/default/grub.d/*.cfg; then
             _install -m 0644 -t /etc/default/grub.d \
-                "$SCRIPT_DIR"/suspend/p16-gen3/i915-suspend.cfg
+                "$SCRIPT_DIR"/system/suspend/p16-gen3/i915-suspend.cfg
             reboot_needed=1
         fi
         if [ "$reboot_needed" -eq 1 ]; then
@@ -935,7 +955,7 @@ else
             update-grub
             echo "  NOTE: nvidia/i915 suspend mitigations changed; reboot to apply."
         fi
-        echo "  NOTE: failure mode 4 is fixed by the patched google-drive-ocamlfuse"
+        echo "  NOTE: failure mode 4 is fixed by the $GDFUSE_VERSION google-drive-ocamlfuse"
         echo "        built in the section above."
         ;;
     'ThinkPad T16 Gen 4')
@@ -957,7 +977,7 @@ banner "Boot display (HiDPI)"
 # GRUB and Plymouth (including the disk-decryption prompt) render at the
 # panel's native resolution; on a HiDPI panel the default 16 px GRUB font
 # and Plymouth's 1x UI are unreadably small. Per-model, since the right
-# scale is a property of the panel. Sources live in hidpi-boot/.
+# scale is a property of the panel. Sources live in system/hidpi-boot/.
 if in_wsl; then
     echo "  Boot display: skipped (WSL)"
 else
@@ -972,18 +992,18 @@ else
                 /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
             grub_refresh=1
         fi
-        if ! cmp -s "$SCRIPT_DIR"/hidpi-boot/hidpi-grub-font.cfg \
+        if ! cmp -s "$SCRIPT_DIR"/system/hidpi-boot/hidpi-grub-font.cfg \
             /etc/default/grub.d/hidpi-grub-font.cfg; then
             _install -m 0644 -t /etc/default/grub.d \
-                "$SCRIPT_DIR"/hidpi-boot/hidpi-grub-font.cfg
+                "$SCRIPT_DIR"/system/hidpi-boot/hidpi-grub-font.cfg
             grub_refresh=1
         fi
         if [ "$grub_refresh" -eq 1 ]; then
             update-grub
         fi
-        if ! cmp -s "$SCRIPT_DIR"/hidpi-boot/plymouthd.conf \
+        if ! cmp -s "$SCRIPT_DIR"/system/hidpi-boot/plymouthd.conf \
             /etc/plymouth/plymouthd.conf; then
-            _install -m 0644 "$SCRIPT_DIR"/hidpi-boot/plymouthd.conf \
+            _install -m 0644 "$SCRIPT_DIR"/system/hidpi-boot/plymouthd.conf \
                 /etc/plymouth/plymouthd.conf
             update-initramfs -u
         fi
@@ -999,25 +1019,25 @@ banner "Journal hygiene"
 # =============================================================================
 
 # Route the chattiest desktop loggers into their own size-capped log files
-# so `journalctl` stays readable; sources live in journal-hygiene/.
+# so `journalctl` stays readable; sources live in system/journal-hygiene/.
 if in_wsl; then
     echo "  Journal hygiene: skipped (WSL)"
 else
     echo "  journald: 20G persistent cap + flood backstop"
-    _install -m 0644 -D "$SCRIPT_DIR"/journal-hygiene/99-journal-hygiene.conf \
+    _install -m 0644 -D "$SCRIPT_DIR"/system/journal-hygiene/99-journal-hygiene.conf \
         /etc/systemd/journald.conf.d/99-journal-hygiene.conf
     systemctl restart systemd-journald
 
     echo "  logrotate: hourly timer override (size caps bite within ~1h)"
-    _install -m 0644 -D "$SCRIPT_DIR"/journal-hygiene/logrotate-frequency.conf \
+    _install -m 0644 -D "$SCRIPT_DIR"/system/journal-hygiene/logrotate-frequency.conf \
         /etc/systemd/system/logrotate.timer.d/frequency.conf
     systemctl daemon-reload
 
     if systemctl cat tailscaled.service > /dev/null 2>&1; then
         echo "  tailscaled -> /var/log/tailscaled.log"
-        _install -m 0644 -D "$SCRIPT_DIR"/journal-hygiene/tailscaled-suppress-journal-spam.conf \
+        _install -m 0644 -D "$SCRIPT_DIR"/system/journal-hygiene/tailscaled-suppress-journal-spam.conf \
             /etc/systemd/system/tailscaled.service.d/suppress-journal-spam.conf
-        _install -m 0644 "$SCRIPT_DIR"/journal-hygiene/logrotate-tailscaled \
+        _install -m 0644 "$SCRIPT_DIR"/system/journal-hygiene/logrotate-tailscaled \
             /etc/logrotate.d/tailscaled
         systemctl daemon-reload
         systemctl try-restart tailscaled.service
@@ -1027,14 +1047,14 @@ else
 
     if command -v slack > /dev/null; then
         echo "  Slack -> ~/.local/state/slack/slack.log (on next Slack launch)"
-        installUser "$USER_HOME"/.local/bin "$SCRIPT_DIR"/journal-hygiene/slack-logged
+        installUser "$USER_HOME"/.local/bin "$SCRIPT_DIR"/system/journal-hygiene/slack-logged
         installUser "$USER_HOME"/.local/share/applications
         sed "s|^Exec=/usr/bin/slack|Exec=$USER_HOME/.local/bin/slack-logged|" \
             /usr/share/applications/slack.desktop \
             > "$USER_HOME"/.local/share/applications/slack.desktop
         _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.local/share/applications/slack.desktop
         sed "s|@USER@|$SUDO_USER|g; s|@USER_HOME@|$USER_HOME|g" \
-            "$SCRIPT_DIR"/journal-hygiene/logrotate-slack.in > /etc/logrotate.d/slack
+            "$SCRIPT_DIR"/system/journal-hygiene/logrotate-slack.in > /etc/logrotate.d/slack
     else
         echo "  Slack: not installed, skipping"
     fi
@@ -1044,9 +1064,9 @@ else
         # The drop-in's append: target dir must exist before the unit starts
         installUser "$USER_HOME"/.local/state/localsearch
         installUser "$USER_HOME"/.config/systemd/user/localsearch-3.service.d \
-            "$SCRIPT_DIR"/journal-hygiene/localsearch-suppress-journal-spam.conf
+            "$SCRIPT_DIR"/system/journal-hygiene/localsearch-suppress-journal-spam.conf
         sed "s|@USER@|$SUDO_USER|g; s|@USER_HOME@|$USER_HOME|g" \
-            "$SCRIPT_DIR"/journal-hygiene/logrotate-localsearch.in > /etc/logrotate.d/localsearch
+            "$SCRIPT_DIR"/system/journal-hygiene/logrotate-localsearch.in > /etc/logrotate.d/localsearch
         systemctl --user --machine="$SUDO_USER@.host" daemon-reload || true
         systemctl --user --machine="$SUDO_USER@.host" try-restart localsearch-3.service || true
         # Keep the indexer out of network-FUSE mounts under $HOME: gdfuse
@@ -1076,7 +1096,7 @@ if [ -e "$USER_RC" ] && grep -q -F "$PATH_SETTINGS_BANNER" "$USER_RC"; then
     echo "  Shell paths/prompt: already configured"
 else
     echo "  Shell paths/prompt: configuring"
-    cat "$SCRIPT_DIR"/dedup_paths.sh >> "$USER_RC"
+    cat "$SCRIPT_DIR"/dotfiles/dedup_paths.sh >> "$USER_RC"
     (
         echo "$PATH_SETTINGS_BANNER"
         echo 'export GOPATH=$HOME/go'
@@ -1093,8 +1113,30 @@ else
         echo 'eval "$(starship init bash)"'
     ) >> "$USER_RC"
     _chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.bashrc
-    installUser "$USER_HOME"/.config "$SCRIPT_DIR"/starship.toml
+    installUser "$USER_HOME"/.config "$SCRIPT_DIR"/dotfiles/starship.toml
 fi
 
 echo
 echo "Done!"
+
+# gdfuse OAuth is the one step provision cannot do: it needs a browser and
+# the user's Google account. Print the recipe until it has been completed.
+if [ ! -e "$USER_HOME/.gdfuse/default/state" ]; then
+    cat << EOF
+
+NOTE: google-drive-ocamlfuse is installed and ~/GoogleDrive will auto-mount
+      at login, but Google Drive authorization has not been done yet
+      (no ~/.gdfuse/default/state). One-time setup, as $SUDO_USER:
+        1. In https://console.cloud.google.com/ create (or pick) a project,
+           enable the Google Drive API (APIs & Services -> Library), then
+           create an OAuth client ID of type "Desktop app"
+           (APIs & Services -> Credentials -> Create credentials).
+        2. Hand the client ID + secret to gdfuse and authorize in a browser:
+             google-drive-ocamlfuse -headless -label default \\
+                 -id <CLIENT_ID>.apps.googleusercontent.com -secret <CLIENT_SECRET>
+           (the values live in ~/.gdfuse/default/config as client_id /
+           client_secret should you ever need to edit them)
+        3. Mount now (or just log out and back in):
+             systemctl --user start $GDFUSE_UNIT
+EOF
+fi
