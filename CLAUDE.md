@@ -2,8 +2,11 @@
 
 Pete Dietl's personal dev environment: dotfiles, a machine-provisioning script,
 embedded-dev udev rules, and machine-specific fix notes. Deployed to
-**pdietl-laptop** (ThinkPad P16 Gen 3, Pete's daily driver) plus WSL boxes;
+**pdietl-laptop** (ThinkPad P16 Gen 3, Pete's daily driver),
+**pdietl-home-ubun** (X870E desktop), plus WSL boxes;
 the ThinkPad T16 Gen 4 chassis is currently diskless (see machine section).
+**Check `hostname`/`dmidecode` before trusting a machine section below** —
+sessions run on any of these boxes.
 Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
 
 ## What this repo is / how it deploys
@@ -127,12 +130,12 @@ does not get it.
   **merged and released in v0.9.1**; `provision` builds that upstream tag
   to `/usr/local/bin` and installs + enables the auto-mount user unit
   (`dotfiles/google-drive-ocamlfuse.service` → `~/GoogleDrive`, inert until
-  the one-time OAuth setup whose recipe provision prints after a run). As
-  of 2026-07-29 this machine has drifted from the doc'd state: the PPA deb
-  **0.9.0** (predates the fix) is installed and `/usr/local/bin/...` is
-  absent — the next `provision` run converges (builds v0.9.1, removes
-  deb + PPA). The `gdfuse` opam switch exists for rebuilds; bump
-  `GDFUSE_VERSION`/`GDFUSE_COMMIT` in `provision` to roll the pin.
+  the one-time OAuth setup whose recipe provision prints after a run). The
+  laptop hasn't rerun `provision` since this change, so it still runs the
+  July pinned-fork build (same statfs code, stamp `972dab0…`); the next run
+  rebuilds at v0.9.1 and adds the auto-mount unit. The `gdfuse` opam switch
+  exists for rebuilds; bump `GDFUSE_VERSION`/`GDFUSE_COMMIT` in `provision`
+  to roll the pin.
 - The old install's apparmor Varlink rules, PCP masks, and nvidia-powerd
   disable don't exist here and haven't been needed (no denial storm observed).
 
@@ -146,3 +149,15 @@ healthy; the one
 real failure mode is the gdfuse FUSE freezer wedge (covered by the universal
 guard `provision` installs). amdgpu `ring gfx_0.0.0 timeout` + self-recovery
 lines are app GPU hangs, not suspend-related — don't chase.
+
+## Machine — pdietl-home-ubun (home desktop)
+
+Gigabyte **X870E AORUS ELITE WIFI7**, AMD **Granite Ridge** (Ryzen 9000)
+iGPU + NVIDIA **RTX 5080** dGPU. First full `provision` run 2026-07-29:
+KiCad built from source and installed, gdfuse **v0.9.1** built + auto-mount
+unit enabled (**OAuth still pending**, unit condition-skipped until then),
+Chrome VA-API verified (direct backend, 6 HEVC profiles on the NVIDIA
+render node), NVIDIA unattended-upgrades hold and journal hygiene applied.
+DMI system-version is not a ThinkPad, so the model-gated suspend/HiDPI
+sections are inert here. No machine-fix notes yet — add
+`machine-notes/<file>.md` when the first real fix lands.
