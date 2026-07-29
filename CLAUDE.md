@@ -47,7 +47,9 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
     mounts.
 - **`machine-notes/`** — machine-fix notes, one markdown file per machine:
   `thinkpad-p16-gen3-ubuntu-suspend.md`, `thinkpad-t16-gen4-ubuntu-suspend.md`.
-  Follow that model for new machines.
+  Follow that model for new machines. Notes hold **current state only**; the
+  investigation narrative — including approaches later refuted — lives in a
+  sibling `*-chronology.md`, which is provenance, not required reading.
 
 ## Conventions
 
@@ -118,7 +120,7 @@ first. Evidence now rides on efi_pstore + netconsole; `kernel.panic=60` is
 verified to self-reboot a panicked machine in exactly 60 s.
 
 Details, constraints and the verification steps still owed are in
-`thinkpad-p16-gen3-ubuntu-suspend.md` under "Crash capture". **Read that
+`machine-notes/thinkpad-p16-gen3-ubuntu-suspend.md` under "Crash capture". **Read that
 before changing the watchdog timeout, `hung_task_timeout_secs`, or the dump
 partition's filesystem** — each has a non-obvious constraint behind it.
 
