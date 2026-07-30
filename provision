@@ -1078,6 +1078,11 @@ else
             /usr/share/applications/slack.desktop \
             > "$USER_HOME"/.local/share/applications/slack.desktop
         _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.local/share/applications/slack.desktop
+        # GIO serves scheme-handler lists from each dir's mimeinfo.cache, and
+        # the override masks the system slack.desktop's cache entry. Without
+        # regenerating the user dir's cache, no app claims slack:// URLs and
+        # the browser-to-app redirect dialog comes up empty.
+        sudo -u "$SUDO_USER" -- update-desktop-database "$USER_HOME"/.local/share/applications
         sed "s|@USER@|$SUDO_USER|g; s|@USER_HOME@|$USER_HOME|g" \
             "$SCRIPT_DIR"/system/journal-hygiene/logrotate-slack.in > /etc/logrotate.d/slack
     else
