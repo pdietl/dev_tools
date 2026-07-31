@@ -28,7 +28,12 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   - **`system/udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP,
     picoprobe, WCH-Link, xgecu) plus a rule hiding ZFS pool members from
     GNOME's dock/Files; see `system/udev_rules/README.md`.
-  - **`system/apt/`** — apt drop-ins (NVIDIA unattended-upgrades hold).
+  - **`system/apt/`** — apt drop-ins: NVIDIA unattended-upgrades hold, and the
+    `DPkg::Post-Invoke` hook that re-derives the Chrome VA-API desktop entry.
+  - **`system/chrome-vaapi/`** — `regenerate-chrome-vaapi-override`, installed
+    to `/usr/local/sbin`. Sole owner of the VA-API launch flag and of the
+    assertions guarding the desktop-entry copy; run by `provision` and by the
+    apt hook above. See "Chrome HEVC hardware decode".
   - **`system/suspend/`** — suspend/resume mitigations: `gdfuse-suspend-guard`
     (every non-WSL machine) plus per-model sets gated on
     `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
@@ -134,20 +139,28 @@ initramfs. Both installed files self-document their revert steps.
 ### Chrome HEVC hardware decode
 Chrome has no software HEVC decoder, so H.265 does not play at all unless
 VA-API decode works. `provision`'s "Chrome hardware video decode" section
-installs `nvidia-vaapi-driver` + `vainfo` and regenerates
+installs `nvidia-vaapi-driver` + `vainfo`, then
+`system/chrome-vaapi/regenerate-chrome-vaapi-override` into `/usr/local/sbin`
+and `system/apt/53chrome-vaapi-override` as an apt drop-in that runs it after
+every dpkg transaction. That generator writes
 `/usr/local/share/applications/google-chrome.desktop` (wins over
 `/usr/share` in `XDG_DATA_DIRS`) adding
 `--enable-features=VaapiOnNvidiaGPUs` — Chrome ships that feature
-disabled, which switches off VA-API on NVIDIA entirely. Ubuntu 26.04's
+disabled, which switches off VA-API on NVIDIA entirely. The override is a
+whole-file copy of a package-managed file, so it is re-derived whenever Chrome
+itself changes rather than only when `provision` runs: a key a new Chrome
+release adds is otherwise absent from the entry that actually wins, and the
+resulting breakage need not look anything like a VA-API problem. Ubuntu 26.04's
 packaged driver (0.0.14) already defaults to the direct/CUDA backend, the
 one that survives Chrome's GPU sandbox, so no upstream source build is
 needed. tf4's `operator_station/setup.sh` builds v0.0.16 from source for
 the same fix; that step is redundant on 26.04 and is deliberately not
 ported. Also needs a Wayland session and `nvidia_drm.modeset=1`. Gated on
 an NVIDIA render node being present, so it is inert on the T16 and under
-WSL. The section hard-fails if Chrome's desktop file stops matching the
-`Exec=` pattern it rewrites, and warns (without aborting) if `vainfo`
-reports no usable HEVC.
+WSL. The generator hard-fails — failing the apt transaction — if Chrome's
+desktop file stops matching the `Exec=` pattern it rewrites, or if the copy
+would differ from the source by anything other than that flag; `provision`
+warns without aborting if `vainfo` reports no usable HEVC.
 
 Verify against the NVIDIA render node (`renderD129` here — the one whose
 `/sys/class/drm/*/device/vendor` is `0x10de`):

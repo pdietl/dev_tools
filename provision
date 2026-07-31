@@ -882,9 +882,8 @@ banner "Chrome hardware video decode (HEVC via NVDEC)"
 # backend, which is the one that survives Chrome's GPU sandbox, so no
 # upstream source build is needed. Decode also requires a Wayland session
 # and nvidia_drm.modeset=1 (set by the NVIDIA packaging's modprobe drop-in).
-declare -r CHROME_DESKTOP_SRC=/usr/share/applications/google-chrome.desktop
-declare -r CHROME_DESKTOP_OVERRIDE=/usr/local/share/applications/google-chrome.desktop
-declare -r CHROME_VAAPI_FLAG=--enable-features=VaapiOnNvidiaGPUs
+declare -r CHROME_OVERRIDE_SCRIPT=/usr/local/sbin/regenerate-chrome-vaapi-override
+declare -r CHROME_OVERRIDE_HOOK=/etc/apt/apt.conf.d/53chrome-vaapi-override
 
 # Gate on a real NVIDIA render node rather than on the machine model: the
 # flag and the driver are both inert without one.
@@ -903,48 +902,24 @@ if in_wsl; then
     echo "  Chrome VA-API: skipped (WSL)"
 elif [ -z "$nvidia_render_node" ]; then
     echo "  Chrome VA-API: skipped (no NVIDIA render node in /dev/dri)"
-elif [ ! -e "$CHROME_DESKTOP_SRC" ]; then
-    echo "  Chrome VA-API: skipped ($CHROME_DESKTOP_SRC not found)"
 else
     echo "  NVIDIA render node: $nvidia_render_node"
     _apt_get install -y nvidia-vaapi-driver vainfo
 
-    # The override is a whole-file copy and Chrome upgrades rewrite the
-    # source, so re-derive it from the pristine file on every run.
-    _mkdir -p "$(dirname "$CHROME_DESKTOP_OVERRIDE")"
-    {
-        cat << EOF
-# Installed by dev_tools/provision -- regenerated on every run, do not edit.
-# Chrome ships VaapiOnNvidiaGPUs disabled, which turns off VA-API decode on
-# NVIDIA GPUs; without it H.265 does not play at all, as Chrome has no
-# software HEVC decoder. /usr/local/share precedes /usr/share in
-# XDG_DATA_DIRS, so this copy wins for every user and survives Chrome
-# upgrades. Only desktop-file launches carry the flag, not 'google-chrome'
-# typed at a shell.
-# Revert: rm this file, then update-desktop-database /usr/local/share/applications
-EOF
-        sed "s|^Exec=/usr/bin/google-chrome-stable|& $CHROME_VAAPI_FLAG|" \
-            "$CHROME_DESKTOP_SRC"
-    } > "$CHROME_DESKTOP_OVERRIDE"
-    update-desktop-database /usr/local/share/applications 2> /dev/null || true
-
-    # Compare against the source rather than just asserting the flag appears
-    # somewhere: a Chrome release that renames the binary path flags nothing,
-    # and one that adds a Desktop Action flags all but the new entry.
-    exec_total=$(grep -c '^Exec=' "$CHROME_DESKTOP_SRC" || true)
-    exec_flagged=$(grep -c "^Exec=.*$CHROME_VAAPI_FLAG" "$CHROME_DESKTOP_OVERRIDE" || true)
-    if [ "$exec_flagged" -eq "$exec_total" ]; then
-        echo "  Chrome launcher override: $exec_flagged/$exec_total Exec lines flagged"
+    # The override is a whole-file copy of a package-managed file, so it goes
+    # stale when Chrome upgrades rather than when this script runs, and
+    # nothing connects those two moments. One generator owns the flag and the
+    # assertions; an apt hook re-runs it after every dpkg transaction and
+    # provision is just another caller.
+    _install -m 0755 "$SCRIPT_DIR"/system/chrome-vaapi/regenerate-chrome-vaapi-override \
+        "$CHROME_OVERRIDE_SCRIPT"
+    if cmp -s "$SCRIPT_DIR"/system/apt/53chrome-vaapi-override "$CHROME_OVERRIDE_HOOK"; then
+        echo "  Chrome override apt hook: already current"
     else
-        # Fatal: this means Chrome's desktop file no longer has the shape the
-        # sed pattern above assumes, so the override is worthless and the
-        # pattern is what needs fixing. Silently shipping a flagless launcher
-        # would look identical to success until a video failed to play.
-        echo "Error: $exec_flagged of $exec_total Exec lines in $CHROME_DESKTOP_OVERRIDE" >&2
-        echo "       carry $CHROME_VAAPI_FLAG. Chrome's desktop file no longer matches" >&2
-        echo "       the Exec= pattern this section rewrites; update it." >&2
-        exit 1
+        _install -m 0644 "$SCRIPT_DIR"/system/apt/53chrome-vaapi-override "$CHROME_OVERRIDE_HOOK"
+        echo "  Chrome override apt hook: installed"
     fi
+    "$CHROME_OVERRIDE_SCRIPT"
 
     # HEVC entrypoints are enumerated from the GPU at runtime, so this is the
     # only real check that decode is available; the backend name alone is not.

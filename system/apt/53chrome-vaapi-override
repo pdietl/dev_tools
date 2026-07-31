@@ -1,0 +1,27 @@
+// Re-derive the Chrome VA-API desktop-entry override after every dpkg run.
+//
+// Why: /usr/local/share/applications/google-chrome.desktop is a whole-file
+// copy of the packaged /usr/share/applications/google-chrome.desktop with one
+// launch flag added, and /usr/local/share precedes /usr/share in
+// XDG_DATA_DIRS, so the copy wins for every user. A Chrome upgrade rewrites
+// the packaged file; the copy keeps winning regardless, so a key the new
+// release added is simply absent from the entry the desktop actually uses.
+// Nothing about that failure points at VA-API, which is the only reason this
+// copy exists.
+//
+// Why a hook and not just the provisioning script: the copy goes out of date
+// when Chrome upgrades, not when the machine is provisioned, and nothing ties
+// those two moments together.
+//
+// Scope: the script writes nothing when the result is unchanged, and removes
+// the override outright if Chrome is uninstalled. It fails the transaction if
+// Chrome's Exec= shape stops matching the pattern it rewrites -- a silently
+// flagless launcher is indistinguishable from success until a video fails to
+// play, so that case has to be loud.
+//
+// Revert: rm this file, /usr/local/sbin/regenerate-chrome-vaapi-override and
+// /usr/local/share/applications/google-chrome.desktop, then
+// update-desktop-database /usr/local/share/applications
+DPkg::Post-Invoke {
+    "if [ -x /usr/local/sbin/regenerate-chrome-vaapi-override ]; then /usr/local/sbin/regenerate-chrome-vaapi-override; fi";
+};
