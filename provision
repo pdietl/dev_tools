@@ -54,6 +54,13 @@ in_wsl() {
     [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]
 }
 
+# ${db:Status-abbrev} is <want><status><eflag>; a held package reads 'hi', so
+# its first field says nothing about whether the package is installed. Match
+# the status field, or every hold looks uninstalled and gets reinstalled.
+pkg_installed() {
+    dpkg-query -Wf'${db:Status-Status}' "$1" 2> /dev/null | grep -qx installed
+}
+
 banner() {
     echo
     echo "==== $* ===="
@@ -112,7 +119,7 @@ banner "Preparing apt sources"
 
 declare -a docker_conflicts=()
 for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
-    if dpkg-query -Wf'${db:Status-abbrev}' "$pkg" 2> /dev/null | grep -q '^i'; then
+    if pkg_installed "$pkg"; then
         docker_conflicts+=("$pkg")
     fi
 done
@@ -376,7 +383,7 @@ fi
 
 if in_wsl; then
     echo "  Saleae Logic2: skipped (WSL)"
-elif dpkg-query -Wf'${db:Status-abbrev}' saleae-logic2 2> /dev/null | grep -q '^i'; then
+elif pkg_installed saleae-logic2; then
     echo "  Saleae Logic2: already installed"
 else
     echo "  Saleae Logic2: installing..."
@@ -398,7 +405,7 @@ fi
 
 if in_wsl; then
     echo "  KiCad: skipped (WSL)"
-elif dpkg-query -Wf'${db:Status-abbrev}' kicad 2> /dev/null | grep -q '^i'; then
+elif pkg_installed kicad; then
     echo "  KiCad: already installed"
 else
     echo "  KiCad: building from source (30-50 min)..."
