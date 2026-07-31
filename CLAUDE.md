@@ -205,7 +205,7 @@ lines are app GPU hangs, not suspend-related — don't chase.
 Gigabyte **X870E AORUS ELITE WIFI7**, AMD **Granite Ridge** (Ryzen 9000)
 iGPU + NVIDIA **RTX 5080** dGPU. First full `provision` run 2026-07-29:
 KiCad built from source and installed, gdfuse **v0.9.1** built + auto-mount
-unit enabled (**OAuth still pending**, unit condition-skipped until then),
+unit enabled and `~/GoogleDrive` mounting (OAuth completed),
 Chrome VA-API verified (direct backend, 6 HEVC profiles on the NVIDIA
 render node), NVIDIA unattended-upgrades hold and journal hygiene applied.
 DMI system-version is not a ThinkPad, so the model-gated suspend/HiDPI
