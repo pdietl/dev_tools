@@ -660,8 +660,24 @@ declare -a dir_list=(
     "$USER_HOME"/Learn
     "$USER_HOME"/Repos
 )
-_mkdir -p "${dir_list[@]}"
-_chown "$SUDO_USER:$SUDO_USER" -R "${dir_list[@]}"
+# A mountpoint belongs to whatever mounted it. google-drive-ocamlfuse mounts
+# without allow_other, so root cannot even stat ~/GoogleDrive, and the
+# recursive chown below would otherwise walk the whole remote filesystem. The
+# directory still has to be created on a machine where nothing has mounted it
+# yet. findmnt answers from /proc/self/mountinfo; mountpoint(1) stats the path
+# and so fails on exactly the mounts this needs to detect.
+declare -a own_dirs=()
+for dir in "${dir_list[@]}"; do
+    if findmnt -rno TARGET --mountpoint "$dir" > /dev/null 2>&1; then
+        echo "  ${dir#"$USER_HOME"/}: mounted, left to its mounter"
+    else
+        own_dirs+=("$dir")
+    fi
+done
+if [ ${#own_dirs[@]} -gt 0 ]; then
+    _mkdir -p "${own_dirs[@]}"
+    _chown "$SUDO_USER:$SUDO_USER" -R "${own_dirs[@]}"
+fi
 
 declare -r KEY_TYPE=ed25519
 declare -r KEY_PATH=/home/$SUDO_USER/.ssh/id_$KEY_TYPE
