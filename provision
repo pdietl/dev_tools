@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eu
+set -eEu
 set -o pipefail
 
 # set -e aborts silently from deep inside a 1000-line script; say where.
