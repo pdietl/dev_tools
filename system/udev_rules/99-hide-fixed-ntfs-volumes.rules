@@ -1,0 +1,21 @@
+# Hide NTFS filesystems on fixed internal disks from udisks, so GNOME stops
+# showing a dual-boot Windows partition as a mountable volume in the dock,
+# Files sidebar, and desktop. Windows' own recovery partition is already
+# hidden upstream by its partition type GUID; the main install uses the
+# generic "Basic data partition" type, which upstream cannot distinguish from
+# a partition someone does want to mount.
+#
+# Removable media is deliberately excluded twice over. ATTRS{removable} alone
+# is not enough: a USB enclosure commonly reports removable=0 for the drive
+# inside it, so an external NTFS disk would match. Internal NVMe and SATA
+# devices have no ID_BUS at all, while anything behind USB is tagged
+# ID_BUS=usb, and that is what separates them.
+#
+# Hiding a volume does not unmount it or make it unreachable -- an fstab entry
+# or an explicit `udisksctl mount` still works. It only removes the one-click
+# affordance for a partition where a stray click can mount a live Windows
+# system.
+#
+# Revert: delete this rule, `udevadm control --reload`, and re-trigger the
+# affected partitions (or reboot).
+SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="ntfs", ENV{ID_BUS}!="usb", ATTRS{removable}=="0", ENV{UDISKS_IGNORE}="1"

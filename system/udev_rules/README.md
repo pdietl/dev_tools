@@ -6,9 +6,10 @@ via udev rules. This directory contains example udev rules to allow pyOCD to acc
 debug probes without requiring it to be run as root, something which is very highly
 discouraged.
 
-(One non-probe rule also lives here: `99-hide-zfs-member-volumes.rules`, which
-keeps GNOME from showing ZFS pool member partitions as mountable volumes.
-Rationale is in the rule's header.)
+(Two non-probe rules also live here, both keeping GNOME from offering volumes
+that a click can only do harm to: `99-hide-zfs-member-volumes.rules` for ZFS
+pool members, and `99-hide-fixed-ntfs-volumes.rules` for a dual-boot Windows
+partition on a fixed internal disk. Rationale is in each rule's header.)
 
 The following debug probes are supported:
 

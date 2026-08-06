@@ -26,8 +26,9 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   `sysmon.sh` (1 Hz system monitor, screen + file logging).
 - **`system/`** — everything `provision` installs outside `$HOME`:
   - **`system/udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP,
-    picoprobe, WCH-Link, xgecu) plus a rule hiding ZFS pool members from
-    GNOME's dock/Files; see `system/udev_rules/README.md`.
+    picoprobe, WCH-Link, xgecu) plus two rules hiding volumes from GNOME's
+    dock/Files: ZFS pool members, and NTFS on a fixed internal disk (a
+    dual-boot Windows install); see `system/udev_rules/README.md`.
   - **`system/apt/`** — apt drop-ins: NVIDIA unattended-upgrades hold, and the
     `DPkg::Post-Invoke` hook that re-derives the Chrome VA-API desktop entry.
   - **`system/chrome-vaapi/`** — `regenerate-chrome-vaapi-override`, installed
