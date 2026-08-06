@@ -23,6 +23,11 @@ ExecStartPre=-/usr/bin/fusermount3 -uz %h/GoogleDrive
 ExecStartPre=/usr/bin/mkdir -p %h/GoogleDrive
 # gdfuse >= 0.9 always runs in the foreground (libfuse -f is hardwired).
 ExecStart=/usr/local/bin/google-drive-ocamlfuse -label default %h/GoogleDrive
+# Pay the cold getattr on the Drive root here rather than leaving it to
+# whatever first stats $HOME after login. systemd-run keeps it off this unit's
+# critical path: the suspend guard restarts this unit from a system-sleep
+# hook, where blocking would delay resume.
+ExecStartPost=-/usr/bin/systemd-run --user --quiet --collect --unit=gdfuse-prewarm /usr/local/bin/gdfuse-prewarm %h/GoogleDrive
 ExecStop=/usr/bin/fusermount3 -u %h/GoogleDrive
 # Remounts after a crash and after the suspend guard aborts a stalled
 # connection pre-sleep. 10 s spacing keeps the default start-rate limit

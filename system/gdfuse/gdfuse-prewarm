@@ -1,0 +1,55 @@
+#!/bin/bash
+set -u
+
+# Warms a google-drive-ocamlfuse mountpoint so the first process to stat it
+# does not pay the cold round trip to Drive.
+#
+# Every process that lists $HOME stats each entry in it, and a cold getattr on
+# the Drive root takes the better part of a second. Without this, that cost
+# lands on whatever runs first after login -- usually the shell prompt, which
+# has no way to dodge it: starship stats every entry to classify it, offers no
+# per-path exclusion, and checks its scan_timeout between entries, so the
+# timeout cannot abort a getattr already in flight. Statting the mount once
+# from here moves the cost to mount time, where nothing is waiting on it.
+#
+# Two constraints shape this script:
+#
+#   * The mount does not exist yet when the calling unit reports started.
+#     Type=exec returns once the binary is exec'd, before gdfuse has mounted,
+#     so statting immediately would measure the empty directory underneath --
+#     warming nothing while appearing to succeed. Hence the wait.
+#
+#   * It must not block its caller. The suspend guard restarts the mount unit
+#     from a system-sleep hook, where anything slow delays resume. The unit
+#     invokes this through systemd-run so it runs detached; the bounded wait
+#     here keeps a mount that never arrives from hanging around either way.
+#
+# Revert: delete this file and the ExecStartPost line that invokes it.
+
+declare -r MOUNTPOINT=${1:-}
+declare -r FSTYPE=fuse.google-drive-ocamlfuse
+declare -r WAIT_SECS=30
+declare -r POLL_SECS=0.25
+
+if [[ -z $MOUNTPOINT ]]; then
+    echo "usage: ${0##*/} <mountpoint>" >&2
+    exit 2
+fi
+
+# Match the filesystem type as well as the path: a leftover mount of something
+# else in the same place would satisfy a path-only check and warm the wrong
+# thing.
+mounted() {
+    findmnt --noheadings --mountpoint "$MOUNTPOINT" --types "$FSTYPE" > /dev/null 2>&1
+}
+
+declare -r deadline=$((SECONDS + WAIT_SECS))
+until mounted; do
+    if ((SECONDS >= deadline)); then
+        echo "${0##*/}: no $FSTYPE mount at $MOUNTPOINT after ${WAIT_SECS}s; nothing warmed" >&2
+        exit 1
+    fi
+    sleep "$POLL_SECS"
+done
+
+stat "$MOUNTPOINT" > /dev/null

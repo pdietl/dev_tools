@@ -35,6 +35,12 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
     to `/usr/local/sbin`. Sole owner of the VA-API launch flag and of the
     assertions guarding the desktop-entry copy; run by `provision` and by the
     apt hook above. See "Chrome HEVC hardware decode".
+  - **`system/gdfuse/`** — `gdfuse-prewarm`, installed to `/usr/local/bin` and
+    run detached by the mount unit's `ExecStartPost`. Stats the mountpoint once
+    the mount exists so the first process to list `$HOME` isn't the one paying
+    the cold getattr against Drive. Nothing on the starship side can avoid
+    that cost — it has no per-path exclusion, and its `scan_timeout` is checked
+    between directory entries, so it cannot abort a getattr already in flight.
   - **`system/suspend/`** — suspend/resume mitigations: `gdfuse-suspend-guard`
     (every non-WSL machine) plus per-model sets gated on
     `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
@@ -184,9 +190,10 @@ does not get it.
   the one-time OAuth setup whose recipe provision prints after a run). The
   laptop hasn't rerun `provision` since this change, so it still runs the
   July pinned-fork build (same statfs code, stamp `972dab0…`); the next run
-  rebuilds at v0.9.1 and adds the auto-mount unit. The `gdfuse` opam switch
-  exists for rebuilds; bump `GDFUSE_VERSION`/`GDFUSE_COMMIT` in `provision`
-  to roll the pin.
+  rebuilds at v0.9.1. The auto-mount unit and `gdfuse-prewarm` are already in
+  place there, so all three machines mount `~/GoogleDrive` from the same unit.
+  The `gdfuse` opam switch exists for rebuilds; bump
+  `GDFUSE_VERSION`/`GDFUSE_COMMIT` in `provision` to roll the pin.
 - The old install's apparmor Varlink rules, PCP masks, and nvidia-powerd
   disable don't exist here and haven't been needed (no denial storm observed).
 

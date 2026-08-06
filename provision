@@ -790,6 +790,7 @@ declare -r GDFUSE_COMMIT=67f87d0cd4cc3c8d294f7e97f94ec5249fb00fc9 # = $GDFUSE_VE
 declare -r GDFUSE_BIN=/usr/local/bin/google-drive-ocamlfuse
 declare -r GDFUSE_STAMP=/usr/local/share/google-drive-ocamlfuse.commit
 declare -r GDFUSE_UNIT=google-drive-ocamlfuse.service
+declare -r GDFUSE_PREWARM=/usr/local/bin/gdfuse-prewarm
 
 if [ -x "$GDFUSE_BIN" ] && [ "$(cat "$GDFUSE_STAMP" 2> /dev/null || true)" = "$GDFUSE_COMMIT" ]; then
     echo "  $GDFUSE_BIN already built from $GDFUSE_VERSION ($GDFUSE_COMMIT)"
@@ -830,6 +831,12 @@ fi
 if ls /etc/apt/sources.list.d/*alessandro-strada* > /dev/null 2>&1; then
     add-apt-repository --remove --no-update -y ppa:alessandro-strada/ppa > /dev/null 2>&1
 fi
+
+# Warms the mount so the first process to list $HOME does not wait on a cold
+# getattr; the unit's ExecStartPost runs it detached. Installed before the
+# unit so a fresh machine never has a unit referring to a missing binary.
+_install -m 0755 "$SCRIPT_DIR"/system/gdfuse/gdfuse-prewarm "$GDFUSE_PREWARM"
+echo "  Mount prewarm: installed $GDFUSE_PREWARM"
 
 # Auto-mount: a user unit keeps ~/GoogleDrive mounted from login on. The
 # suspend guard installed below restarts this exact unit name after aborting
