@@ -3,7 +3,8 @@
 Pete Dietl's personal dev environment: dotfiles, a machine-provisioning script,
 embedded-dev udev rules, and machine-specific fix notes. Deployed to
 **pdietl-laptop** (ThinkPad P16 Gen 3, Pete's daily driver),
-**pdietl-home-ubun** (X870E desktop), plus WSL boxes;
+**pdietl-home-ubun** (X870E desktop), **pdietl-laptop-wwan** (ThinkPad T16
+Gen 5, WWAN test unit), plus WSL boxes;
 the ThinkPad T16 Gen 4 chassis is currently diskless (see machine section).
 **Check `hostname`/`dmidecode` before trusting a machine section below** —
 sessions run on any of these boxes.
@@ -219,3 +220,32 @@ render node), NVIDIA unattended-upgrades hold and journal hygiene applied.
 DMI system-version is not a ThinkPad, so the model-gated suspend/HiDPI
 sections are inert here. No machine-fix notes yet — add
 `machine-notes/<file>.md` when the first real fix lands.
+
+## Machine — pdietl-laptop-wwan (WWAN test unit)
+
+ThinkPad **T16 Gen 5** (`21WXCTO1WW`), Ubuntu 26.04. AMD **Krackan**
+`Ryzen AI 7 PRO 450` APU (Radeon 860M, `amdgpu`), no discrete GPU; LUKS
+root over LVM/ext4, **not ZFS** like the P16; 1920x1200 eDP, so nothing
+here wants the HiDPI boot fixes; s2idle only. MediaTek **MT7925** Wi-Fi
+(`mt7925e`), Realtek ethernet (`r8169`), and the Foxconn **T99W696** WWAN
+modem (`wwan0`, via ModemManager) this unit exists to exercise, kept
+connected as a fallback that yields the route to any other working link.
+
+`provision` runs clean here: gdfuse **v0.9.1** built, `gdfuse-prewarm` and
+the universal suspend guard installed, journal hygiene applied,
+`~/GoogleDrive` mounting (OAuth completed). DMI system-version reads
+`ThinkPad T16 Gen 5`, which matches neither model-gated set, so the suspend
+and HiDPI sections both report nothing known and do nothing; with no NVIDIA
+render node the Chrome VA-API section is inert too. Only the universal
+pieces land here, so treat a `/usr/lib/systemd/system-sleep` holding
+nothing of ours but `gdfuse-suspend-guard` as correct, not as a failed run.
+
+WWAN is not `provision`'s to install. The modem needs an FCC unlock on every
+power-on, plus a resume hook, a fallback routing policy and a signal
+indicator, and all of it belongs to `pdietl/lenovo-5g-modem`, which owns this
+hardware end to end. That repo puts root-owned files under `/usr/local/sbin`,
+`/etc/ModemManager` and `/etc/sysctl.d` that `provision` neither installs nor
+knows about — their absence from this repo is correct, not a gap, and they do
+not want a `machine-notes/` entry duplicating what that repo already says.
+Read its `docs/FINDINGS.md` before changing anything cellular; most of what
+looks misconfigured there is deliberate.
