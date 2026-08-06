@@ -6,12 +6,19 @@ set -u
 # gdfuse serves FUSE requests with blocking network I/O and retries without
 # bound. If the network dies while a request is in flight (e.g. unplugging
 # ethernet right before the machine sleeps), the calling task waits in
-# uninterruptible D-state inside the kernel's FUSE layer. D-state tasks
-# cannot be frozen, so every suspend attempt fails after the 20 s freezer
-# timeout and the machine wedges awake until hard power-off. Journal
-# signature: "Freezing user space processes failed after 20.0 seconds
-# (N tasks refusing to freeze)" with fuse_statfs or fuse_do_getattr in the
-# stack trace.
+# uninterruptible D-state inside the kernel's FUSE layer. A D-state task can
+# be frozen by neither of the two mechanisms a suspend uses, and each stalls
+# differently:
+#
+#   * systemd-sleep freezes user.slice through the cgroup freezer before it
+#     does anything else. That stall is a full minute and ends in "Failed to
+#     freeze unit 'user.slice': Connection timed out", after which the
+#     suspend proceeds anyway -- so it reads as a machine that ignored the
+#     lid and then slept at random, often once the lid is open again.
+#   * The kernel freezer then refuses the task outright: "Freezing user space
+#     processes failed after 20.0 seconds (N tasks refusing to freeze)", with
+#     fuse_statfs or fuse_do_getattr in the stack trace, and the machine
+#     wedges awake until hard power-off.
 #
 # Before sleep: if a gdfuse FUSE connection still has unanswered requests
 # after a short drain period, abort the connection. All waiters wake
@@ -19,8 +26,16 @@ set -u
 # unmount the dead mountpoint and restart the owning user's
 # google-drive-ocamlfuse.service so the mount comes straight back.
 #
+# Both halves are timing-critical, which is why gdfuse-suspend-guard.service
+# invokes this rather than /usr/lib/systemd/system-sleep/. Hooks in that
+# directory run inside systemd-sleep, after it has already frozen user.slice
+# and before it has thawed it: too late for the abort to spare the cgroup
+# freezer, and too early for the restart, which cannot start a unit inside a
+# frozen slice. Ordering against sleep.target puts each half on the right
+# side of both. Keep it there.
+#
 # Cost: a request aborted mid-flight surfaces as one EIO to the caller.
-# Revert: delete this file.
+# Revert: disable gdfuse-suspend-guard.service and delete both files.
 
 declare -r LOG_TAG='gdfuse-suspend-guard'
 declare -r STATE_FILE='/run/gdfuse-suspend-guard.aborted'

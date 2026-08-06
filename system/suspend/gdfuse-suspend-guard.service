@@ -1,0 +1,36 @@
+# Installed to /etc/systemd/system/ by dev_tools/provision and enabled into
+# sleep.target.wants. Runs system/suspend/gdfuse-suspend-guard, which explains
+# what it aborts and why; this file exists only to place the two halves either
+# side of systemd-sleep.
+#
+# Ordering is the whole point. systemd-sleep freezes user.slice, runs the
+# hooks in /usr/lib/systemd/system-sleep/, sleeps, then thaws -- so a hook in
+# that directory can only ever run between the freeze and the thaw, which is
+# the one window where neither half of this guard works. sleep.target is
+# ordered before systemd-suspend.service, so Before=sleep.target puts
+# ExecStart ahead of the freeze; systemd stops units in reverse start order,
+# which puts ExecStop after the thaw.
+#
+# Revert: systemctl disable --now gdfuse-suspend-guard.service, then delete
+# this file and /usr/local/sbin/gdfuse-suspend-guard.
+
+[Unit]
+Description=Abort stalled google-drive-ocamlfuse requests around sleep
+Documentation=file:/usr/local/sbin/gdfuse-suspend-guard
+Before=sleep.target
+# sleep.target only Wants this, and Wants does not propagate a stop. Without
+# StopWhenUnneeded the unit stays active after resume and ExecStop never runs.
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/gdfuse-suspend-guard pre
+ExecStop=/usr/local/sbin/gdfuse-suspend-guard post
+# The drain is bounded inside the script; this only stops a wedged abort from
+# holding the suspend open indefinitely.
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=sleep.target

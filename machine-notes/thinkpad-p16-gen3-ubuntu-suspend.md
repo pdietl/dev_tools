@@ -308,10 +308,12 @@ Defense-in-depth: the patch only covers `statfs`; any *other* gdfuse
 operation caught in flight when the network dies wedges the freezer the
 same way (seen on the T16 via `fuse_do_getattr`/`fuse_file_read_iter` —
 see `thinkpad-t16-gen4-ubuntu-suspend.md`). The
-`/usr/lib/systemd/system-sleep/gdfuse-suspend-guard` hook (repo:
-`system/suspend/gdfuse-suspend-guard`) aborts a gdfuse FUSE connection that still
-has unanswered requests at sleep time, op-agnostically, and remounts after
-resume.
+`gdfuse-suspend-guard.service` (repo: `system/suspend/gdfuse-suspend-guard`
+plus its unit) aborts a gdfuse FUSE connection that still has unanswered
+requests at sleep time, op-agnostically, and remounts after resume. It is
+ordered against `sleep.target` rather than dropped in
+`/usr/lib/systemd/system-sleep/`, because both of its halves have to land
+outside the window `systemd-sleep` spends with `user.slice` frozen.
 
 ### Already present in baseline (do NOT touch)
 

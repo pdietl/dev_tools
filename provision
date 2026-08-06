@@ -961,10 +961,24 @@ if in_wsl; then
 else
     # A FUSE filesystem whose daemon blocks on a dead network leaves callers
     # in unfreezable D-state, so every suspend attempt fails; applies to any
-    # machine that mounts google-drive-ocamlfuse.
+    # machine that mounts google-drive-ocamlfuse. A unit ordered against
+    # sleep.target rather than a hook in /usr/lib/systemd/system-sleep, for
+    # the ordering reasons the unit file gives.
     echo "  gdfuse suspend guard: installing"
-    _install -m 0755 -t /usr/lib/systemd/system-sleep \
-        "$SCRIPT_DIR"/system/suspend/gdfuse-suspend-guard
+    _install -m 0755 "$SCRIPT_DIR"/system/suspend/gdfuse-suspend-guard \
+        /usr/local/sbin/gdfuse-suspend-guard
+    _install -m 0644 "$SCRIPT_DIR"/system/suspend/gdfuse-suspend-guard.service \
+        /etc/systemd/system/gdfuse-suspend-guard.service
+    systemctl daemon-reload
+    systemctl enable gdfuse-suspend-guard.service > /dev/null
+    # The same script used to be dropped here, where both of its halves land
+    # in the one window that does not work. Leaving it would run the guard
+    # twice, and the late copy finds nothing to abort, which reads as proof
+    # the guard is working.
+    if [ -e /usr/lib/systemd/system-sleep/gdfuse-suspend-guard ]; then
+        rm -f /usr/lib/systemd/system-sleep/gdfuse-suspend-guard
+        echo "  gdfuse suspend guard: removed superseded system-sleep hook"
+    fi
 
     hw_model=$(dmidecode -s system-version 2> /dev/null || echo unknown)
     case "$hw_model" in

@@ -45,7 +45,11 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   - **`system/suspend/`** — suspend/resume mitigations: `gdfuse-suspend-guard`
     (every non-WSL machine) plus per-model sets gated on
     `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
-    machine-fix notes.
+    machine-fix notes. The gdfuse guard is a **unit** ordered against
+    `sleep.target`, not a `/usr/lib/systemd/system-sleep/` hook, and moving
+    it back there silently breaks both of its halves — the unit file explains
+    why. The per-model sets in `p16-gen3/` are ordinary sleep hooks and are
+    unaffected.
   - **`system/hidpi-boot/`** — HiDPI boot-display fixes installed per-model
     (P16 Gen 3's 3840x2400 panel): 32 px GRUB font drop-in + Plymouth
     `DeviceScale=2` so the GRUB menu and disk-decryption prompt are readable.

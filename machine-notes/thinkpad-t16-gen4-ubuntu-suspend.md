@@ -87,12 +87,20 @@ still covers every other reader.
 
 ---
 
-## Mitigation: `gdfuse-suspend-guard` sleep hook
+## Mitigation: `gdfuse-suspend-guard`
 
-`/usr/lib/systemd/system-sleep/gdfuse-suspend-guard` — maintained in
-dev_tools at `system/suspend/gdfuse-suspend-guard`, installed by `provision` on
+`gdfuse-suspend-guard.service`, which runs `/usr/local/sbin/gdfuse-suspend-guard`
+— maintained in dev_tools at `system/suspend/gdfuse-suspend-guard` and
+`system/suspend/gdfuse-suspend-guard.service`, installed by `provision` on
 all non-WSL machines (it is hardware-independent), and installed manually
 on this machine 2026-07-12.
+
+It is a unit ordered against `sleep.target`, not a script in
+`/usr/lib/systemd/system-sleep/`. Hooks in that directory run inside
+`systemd-sleep`, which freezes `user.slice` before calling them and thaws it
+after — so from there the abort comes too late to spare the cgroup freezer, and
+the remount comes too early to start a unit inside a still-frozen slice. The
+unit file carries the full reasoning.
 
 Behavior:
 - **pre-sleep:** find every `fuse.google-drive-ocamlfuse` mount in
