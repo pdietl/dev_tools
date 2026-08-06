@@ -674,9 +674,16 @@ for dir in "${dir_list[@]}"; do
         own_dirs+=("$dir")
     fi
 done
+# Created as the user, so there is no root-owned directory to repair
+# afterwards. A root mkdir needs a chown, and a recursive one walks every
+# checkout under ~/Repos -- tens of thousands of inodes, including build trees
+# -- to correct at most the single directory it had just created. provision
+# promises these directories, not their contents; the non-recursive chown keeps
+# that promise for one an earlier run left owned by root, and claims nothing
+# below it.
 if [ ${#own_dirs[@]} -gt 0 ]; then
-    _mkdir -p "${own_dirs[@]}"
-    _chown "$SUDO_USER:$SUDO_USER" -R "${own_dirs[@]}"
+    sudo -u "$SUDO_USER" mkdir -p "${own_dirs[@]}"
+    _chown "$SUDO_USER:$SUDO_USER" "${own_dirs[@]}"
 fi
 
 declare -r KEY_TYPE=ed25519
