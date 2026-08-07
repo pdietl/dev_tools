@@ -135,12 +135,20 @@ _install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg |
     gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
-rm -f /etc/apt/sources.list.d/docker.list
-echo \
-    "deb [arch=$(dpkg --print-architecture)" \
-    'signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu' \
-    "$(. /etc/os-release && echo "$VERSION_CODENAME") stable" > \
-    /etc/apt/sources.list.d/docker.list
+# deb822 rather than a one-line .list: `apt modernize-sources` rewrites any
+# .list into a .sources beside it, keeps both live, and never converts again.
+# A .list written here therefore comes back as a duplicate apt target the next
+# time that runs, while a .sources is a fixed point. Clear both artifacts of
+# the legacy form so a converted tree converges instead of accumulating.
+rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.list.bak
+cat > /etc/apt/sources.list.d/docker.sources << EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.gpg
+EOF
 
 # =============================================================================
 banner "Installing packages"
