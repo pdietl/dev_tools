@@ -906,6 +906,24 @@ desktop, so it is safe to leave armed. No initrd regeneration is needed: no
 nvidia module is in the initramfs, so the option is read when the module
 loads from the root filesystem.
 
+**The capture path is verified**, by hotplugging HDMI and confirming the
+detach/attach pair is logged (`DPCONN> Notify detach begin`/`end`,
+`DP2xCONN> Notify Attach Begin` with the link parameters). A refusal
+arriving on this path will therefore be recorded rather than silently
+missed. A clean modeset costs on the order of a dozen lines.
+
+Two messages accompany every successful HDMI attach, and are not the fault:
+
+```
+WARNING: DP> AuxChCtl Failing, if a device is connected you shouldn't be seeing this
+ERROR: DP2xCONN> SST-Flush mode should not be called when head is not attached.
+```
+
+Their `ERROR:`/`WARNING:` prefixes do **not** mean they print without the
+knob. `nvkms_log()` takes its severity from the caller, while whether the
+call happens at all is what `debug=1` gates — with the knob off this driver
+logs nothing but its load banner, however severe the text.
+
 The other modeset parameters are dead ends — `malloc_verbose` is read-only
 at runtime and reports only at module unload, `fail_malloc` is fault
 injection, and `ResmanDebugLevel`/`RmMsg` are resman-level with no value
