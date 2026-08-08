@@ -1,0 +1,18 @@
+# Size-capped rotation for /var/log/nvkms-refusals.log (written by
+# /usr/local/sbin/nvkms-refusal-snapshot).
+#
+# No copytruncate: the writer opens and closes the file per snapshot rather
+# than holding the fd, so a rename cannot strand it writing to the rotated
+# inode, and plain rotation cannot clip a partly written snapshot.
+#
+# The cap is small because the cooldown in the writer already bounds this to
+# one snapshot per burst; reaching 10M would mean something is wrong with
+# the cooldown, not that the log is legitimately large.
+/var/log/nvkms-refusals.log {
+    su root adm
+    size 10M
+    rotate 3
+    compress
+    missingok
+    notifempty
+}

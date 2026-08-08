@@ -20,11 +20,15 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
 - **`dotfiles/`** — everything `provision` copies into the invoking user's
   `$HOME`: `vimrc`, `nvim/` (LazyVim), `tmux.conf`, `starship.toml`, `gdbinit`,
   `nix.conf`, `gitignore_global`, `cscope_maps.vim`, `dedup_paths.sh`
-  (PATH-dedup helper), and `google-drive-ocamlfuse.service` (auto-mount user
-  unit, see below). The repo's own `.editorconfig` stays at the top level.
+  (PATH-dedup helper), and two user units: `google-drive-ocamlfuse.service`
+  (auto-mount, see below) and `sysmon.service` (continuous telemetry, see "GPU
+  fault capture"). The repo's own `.editorconfig` stays at the top level.
 - **`bin/`** — user scripts copied to `~/bin` (on `$PATH`): `netinfo`,
   `do_cscope`, `do_update`, `ntfy`, `wsl_usb_attach`/`detach`, `reset`,
-  `sysmon.sh` (1 Hz system monitor, screen + file logging).
+  `sysmon.sh` (system + GPU monitor, screen + file logging; period from
+  `SYSMON_INTERVAL`, default 1 s, and it appends rather than truncating so a
+  restarted run adds to the record). Run continuously at 10 s by the
+  `sysmon.service` user unit — see "GPU fault capture".
 - **`system/`** — everything `provision` installs outside `$HOME`:
   - **`system/udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP,
     picoprobe, WCH-Link, xgecu) plus two rules hiding volumes from GNOME's
@@ -42,6 +46,12 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
     the cold getattr against Drive. Nothing on the starship side can avoid
     that cost — it has no per-path exclusion, and its `scan_timeout` is checked
     between directory entries, so it cannot abort a getattr already in flight.
+  - **`system/gpu-capture/`** — instrumentation for the dGPU scanout-allocation
+    refusal: `nvkms-refusal-snapshot` (+ its unit) captures GPU state at the
+    moment of a refusal, since the driver reports every cause identically, and
+    logrotate configs cap both that log and `sysmon`'s. Gated on an NVIDIA
+    render node, so inert elsewhere. The `sysmon.service` user unit that pairs
+    with it lives in `dotfiles/` with the other things installed into `$HOME`.
   - **`system/suspend/`** — suspend/resume mitigations: `gdfuse-suspend-guard`
     (every non-WSL machine) plus per-model sets gated on
     `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
@@ -113,7 +123,11 @@ none of the four suspend modes apply and chasing them wastes time. Same doc,
 section "Display glitch / laggy desktop". Why the dGPU refuses the allocation
 is still open; `/etc/modprobe.d/nvidia-modeset-debug.conf` (`nvidia_modeset
 debug=1`, hand-applied, **not** installed by `provision`) is armed to capture
-the reason, and `bin/sysmon.sh` now logs free/reserved framebuffer.
+the reason. Two services capture the rest (`system/gpu-capture/`, installed by
+`provision`): `nvkms-refusal-snapshot.service` snapshots GPU state at each
+refusal into `/var/log/nvkms-refusals.log`, and the `sysmon.service` user unit
+logs 10 s telemetry to `~/.local/state/sysmon/`. Both are size-capped by
+logrotate.
 
 ### Crash capture (applied 2026-07-25)
 Two hard hangs in two days (2026-07-24 reboot teardown, 2026-07-25 idle),

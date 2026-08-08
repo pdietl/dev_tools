@@ -929,12 +929,38 @@ at runtime and reports only at module unload, `fail_malloc` is fault
 injection, and `ResmanDebugLevel`/`RmMsg` are resman-level with no value
 semantics documented in `nv-reg.h`.
 
-`bin/sysmon.sh` logs free, total and reserved framebuffer beside used, so a
-run captured across an occurrence shows whether headroom was actually gone.
+Two services carry the rest, installed by `provision` from
+`system/gpu-capture/`. They answer different questions and neither replaces
+the other.
+
+**`nvkms-refusal-snapshot.service`** (system; needs an NVIDIA render node)
+watches the kernel log and, the moment a refusal appears, appends framebuffer
+headroom, per-process GPU memory, the connected heads and their modes, and
+the surrounding `nvidia-modeset:` lines to `/var/log/nvkms-refusals.log`.
+A periodic sampler is the wrong instrument for this on its own, because a
+burst can begin and end inside one sample period. Bursts collapse to one
+snapshot per minute: the first refusal is the informative one, and the
+hundreds that can follow describe a GPU already in the failed state.
+
+Snapshot state is read a fraction of a second after the refusal, not at the
+instant of it — near enough that nothing else has moved, but it is a read of
+the aftermath rather than of the failing call.
+
+**`sysmon.service`** (user unit, `dotfiles/sysmon.service`) runs
+`bin/sysmon.sh` at 10 s into `~/.local/state/sysmon/sysmon.csv`, giving the
+trend either side of an event and covering the gradual kind that fires no
+event at all. Being a user unit it does not run while nobody is logged in,
+which suits faults that happen around docking and suspend on a live session;
+`loginctl enable-linger` would widen that.
+
+Both logs are size-capped by `/etc/logrotate.d/{nvkms-refusals,sysmon}`,
+which the hourly logrotate override from `system/journal-hygiene/` makes
+bite promptly.
 
 Reading it back:
 
 ```bash
+cat /var/log/nvkms-refusals.log             # state at each refusal
 journalctl -b -k | grep 'NVKMS memory'      # the refusals
 journalctl -b    | grep 'lock front buffer' # mutter's fallout
 journalctl -b -k | grep 'nvidia-modeset:'   # the reason, once debug=1

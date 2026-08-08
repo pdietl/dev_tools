@@ -1,0 +1,19 @@
+# Size-capped rotation for the sysmon telemetry log (see the user unit
+# ~/.config/systemd/user/sysmon.service).
+# Template: provision substitutes @USER@/@USER_HOME@ and installs as
+# /etc/logrotate.d/sysmon. su because the file is user-owned.
+#
+# No copytruncate: sysmon.sh appends per row and does not hold the fd open,
+# so a rename cannot strand it writing to the rotated inode.
+#
+# sysmon.sh re-emits the CSV header when it finds the file missing or empty,
+# so the generation created after a rotation names its own columns rather
+# than leaving them behind in the rotated file.
+@USER_HOME@/.local/state/sysmon/sysmon.csv {
+    su @USER@ @USER@
+    size 20M
+    rotate 5
+    compress
+    missingok
+    notifempty
+}

@@ -1,0 +1,119 @@
+#!/bin/bash
+set -u
+
+# Snapshot GPU state the moment the dGPU refuses an NVKMS allocation.
+#
+# nvidia-drm reports every such refusal as one generic message and a bare
+# -EINVAL, so the diagnosis has to come from what surrounds it: framebuffer
+# headroom, who is holding it, and the display topology whose bandwidth the
+# modeset driver was arbitrating. None of that can be asked for after the
+# fact, and a periodic sampler is a poor fit because a burst can begin and
+# end inside one sample period.
+#
+# The modeset debug lines are captured alongside, since with
+# nvidia_modeset debug=1 the actual reason is logged there and nowhere else.
+# Without that knob a snapshot still records headroom and topology, so this
+# degrades rather than breaking.
+#
+# Snapshots land in one append-only file so ordinary logrotate applies. The
+# file is opened and closed per write rather than held open, which is why
+# rotation needs no copytruncate and cannot lose a partially written line.
+#
+# Revert: systemctl disable --now nvkms-refusal-snapshot.service, then delete
+# this script, the unit, and /etc/logrotate.d/nvkms-refusals.
+
+declare -r LOG=/var/log/nvkms-refusals.log
+declare -r PATTERN='Failed to allocate NVKMS memory'
+
+# One snapshot per burst. The first refusal is the informative one; the
+# hundreds that can follow describe a GPU already in the failed state, and
+# writing a snapshot per line would bury it and cost more than it captures.
+declare -r COOLDOWN=60
+
+# How far back to reach for context. The refusal is the tail of a modeset
+# that began earlier, so the reason usually precedes it rather than follows.
+declare -r CONTEXT_SECONDS=90
+
+emit() {
+    printf '%s\n' "$*" >> "$LOG"
+}
+
+snapshot() {
+    local trigger=$1
+
+    emit ""
+    emit "=============================================================="
+    emit "NVKMS allocation refused at $(date -Is)"
+    emit "trigger: $trigger"
+    emit "=============================================================="
+
+    emit ""
+    emit "--- framebuffer ---"
+    if command -v nvidia-smi > /dev/null 2>&1; then
+        nvidia-smi --query-gpu=memory.total,memory.used,memory.free,memory.reserved \
+            --format=csv >> "$LOG" 2>&1 || emit "(nvidia-smi query failed)"
+        emit ""
+        emit "--- per-process GPU memory ---"
+        # nvidia-smi's own process_name is the full command line, which for an
+        # Electron or Chrome GPU process is hundreds of characters of flags and
+        # base64 and buries the number that matters. Resolve the name from
+        # /proc instead, keeping enough of the command line to tell a browser's
+        # GPU process apart from its renderers -- the pid cannot be resolved
+        # later, by which time the process is gone.
+        local pid mem name args
+        emit "$(printf '%-8s %8s  %s' pid mem_mib process)"
+        while IFS=, read -r pid mem; do
+            pid=${pid// /}
+            [ -n "$pid" ] || continue
+            name=$(cat "/proc/$pid/comm" 2> /dev/null) || name='<gone>'
+            args=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2> /dev/null | cut -c1-70)
+            emit "$(printf '%-8s %8s  %s' "$pid" "${mem// /}" "${args:-$name}")"
+        done < <(nvidia-smi --query-compute-apps=pid,used_memory \
+            --format=csv,noheader,nounits 2> /dev/null)
+    else
+        emit "(nvidia-smi absent)"
+    fi
+
+    # Topology is what display-bandwidth arbitration is computed over, so a
+    # refusal is only interpretable next to the heads that were live.
+    emit ""
+    emit "--- connectors ---"
+    local c status mode
+    for c in /sys/class/drm/card*-*; do
+        [ -e "$c/status" ] || continue
+        status=$(cat "$c/status" 2> /dev/null)
+        [ "$status" = connected ] || continue
+        mode=$(head -1 "$c/modes" 2> /dev/null)
+        emit "$(basename "$c")  ${mode:-<no modes>}"
+    done
+
+    emit ""
+    emit "--- nvidia-modeset context ---"
+    # This block holds the actual reason, but only when the debug knob is on.
+    # Report the knob's value beside an empty result rather than guessing at
+    # it: silence with the knob on means no modeset happened in the window,
+    # which is a different finding from silence because nothing was armed.
+    local dbg
+    dbg=$(cat /sys/module/nvidia_modeset/parameters/debug 2> /dev/null) || dbg='<unreadable>'
+    if ! journalctl -k --no-pager --since "$CONTEXT_SECONDS seconds ago" 2> /dev/null \
+        | grep -F 'nvidia-modeset:' >> "$LOG"; then
+        emit "(none in the last ${CONTEXT_SECONDS}s; nvidia_modeset debug=$dbg)"
+    fi
+}
+
+# -n0 so a restart does not re-snapshot refusals already recorded by the
+# previous run; only lines arriving from now on count.
+last=0
+journalctl -k -f -n0 --no-pager 2> /dev/null | while IFS= read -r line; do
+    case "$line" in
+        *"$PATTERN"*) ;;
+        *) continue ;;
+    esac
+
+    now=$(date +%s)
+    if [ $((now - last)) -lt "$COOLDOWN" ]; then
+        continue
+    fi
+    last=$now
+    snapshot "$line"
+done

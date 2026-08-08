@@ -1,0 +1,38 @@
+# Installed to ~/.config/systemd/user/ by dev_tools/provision
+# (dotfiles/sysmon.service) and enabled via the default.target.wants symlink
+# provision creates next to it.
+#
+# Continuous low-rate system + GPU telemetry, so that a fault which is only
+# visible while it is happening leaves a record. It is deliberately the slow
+# half of the instrumentation: nvkms-refusal-snapshot.service captures detail
+# at the moment of a known event, while this captures the trend either side
+# of one, including the gradual kind no event fires for.
+#
+# A user unit because the script lives in ~/bin and the log is user-owned;
+# the consequence is that it does not run while nobody is logged in. That
+# suits what it is for, since the faults of interest happen around docking
+# and suspend on a live session. `loginctl enable-linger` would widen it.
+#
+# Revert: systemctl --user disable --now sysmon.service, then delete this
+# file, the wants symlink, and /etc/logrotate.d/sysmon.
+
+[Unit]
+Description=Low-rate system and GPU telemetry to ~/.local/state/sysmon
+
+[Service]
+Type=exec
+# 10 s rather than the interactive default of 1 s: this runs for weeks, and
+# the period is set by mpstat's own averaging window, so a longer one costs
+# proportionally less while still bracketing a fault to within a few samples.
+Environment=SYSMON_INTERVAL=10
+ExecStart=%h/bin/sysmon.sh %h/.local/state/sysmon/sysmon.csv
+# Telemetry must never compete with the desktop it is measuring.
+Nice=10
+# The script appends, so a restart adds to the record rather than replacing
+# it, and a transient failure in one of the tools it spawns cannot end the
+# logging for the rest of the session.
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

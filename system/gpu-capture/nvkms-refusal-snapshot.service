@@ -1,0 +1,31 @@
+# Installed to /etc/systemd/system/ by dev_tools/provision
+# (system/gpu-capture/nvkms-refusal-snapshot.service).
+#
+# Watches the kernel log for the dGPU refusing an NVKMS allocation and
+# snapshots GPU state the moment one appears. A system unit rather than a
+# user one because the refusal can happen at the greeter, before any session
+# exists, and because it writes under /var/log.
+#
+# Revert: systemctl disable --now nvkms-refusal-snapshot.service, then delete
+# this file and /usr/local/sbin/nvkms-refusal-snapshot.
+
+[Unit]
+Description=Snapshot GPU state when NVKMS refuses an allocation
+# The watcher reads the journal, so it cannot see refusals logged before
+# journald is accepting entries.
+After=systemd-journald.service
+ConditionPathExistsGlob=/dev/nvidia[0-9]
+
+[Service]
+Type=exec
+ExecStart=/usr/local/sbin/nvkms-refusal-snapshot
+# The snapshots are the output; the unit's own stdout carries nothing worth
+# putting in the journal it is reading.
+StandardOutput=null
+# journalctl -f can end if journald is restarted, which must not silently
+# leave the machine uninstrumented for the rest of the boot.
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

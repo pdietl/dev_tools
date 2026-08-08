@@ -1151,6 +1151,53 @@ else
 fi
 
 # =============================================================================
+banner "GPU fault capture"
+# =============================================================================
+
+# Two halves of one instrument, for a fault that is only diagnosable while it
+# is happening. The snapshot service records GPU state the moment the dGPU
+# refuses an NVKMS allocation, since nvidia-drm reports every cause as the
+# same message and a bare -EINVAL; sysmon records the trend either side of
+# one, covering the gradual kind that fires no event. Sources in
+# system/gpu-capture/; the failure itself is written up in the P16 Gen 3
+# machine notes.
+if in_wsl; then
+    echo "  GPU fault capture: skipped (WSL)"
+else
+    # Reuses the render-node probe from the Chrome VA-API section above: the
+    # watcher has nothing to watch on a machine with no NVIDIA GPU.
+    if [ -z "$nvidia_render_node" ]; then
+        echo "  NVKMS refusal snapshots: skipped (no NVIDIA render node)"
+    else
+        echo "  NVKMS refusal snapshots: -> /var/log/nvkms-refusals.log"
+        _install -m 0755 "$SCRIPT_DIR"/system/gpu-capture/nvkms-refusal-snapshot \
+            /usr/local/sbin/nvkms-refusal-snapshot
+        _install -m 0644 "$SCRIPT_DIR"/system/gpu-capture/nvkms-refusal-snapshot.service \
+            /etc/systemd/system/nvkms-refusal-snapshot.service
+        _install -m 0644 "$SCRIPT_DIR"/system/gpu-capture/logrotate-nvkms-refusals \
+            /etc/logrotate.d/nvkms-refusals
+        systemctl daemon-reload
+        systemctl enable nvkms-refusal-snapshot.service > /dev/null
+        # Restart rather than start, so a re-run picks up an edited script
+        # instead of leaving the previous copy watching.
+        systemctl restart nvkms-refusal-snapshot.service
+    fi
+
+    echo "  sysmon telemetry: -> ~/.local/state/sysmon/sysmon.csv"
+    # The unit's log path must exist before it starts; it writes as the user.
+    installUser "$USER_HOME"/.local/state/sysmon
+    sysmon_unit_dir="$USER_HOME/.config/systemd/user"
+    installUser "$sysmon_unit_dir" "$SCRIPT_DIR/dotfiles/sysmon.service"
+    installUser "$sysmon_unit_dir/default.target.wants"
+    ln -sfn ../sysmon.service "$sysmon_unit_dir/default.target.wants/sysmon.service"
+    _chown -h "$SUDO_USER":"$SUDO_USER" "$sysmon_unit_dir/default.target.wants/sysmon.service"
+    sed "s|@USER@|$SUDO_USER|g; s|@USER_HOME@|$USER_HOME|g" \
+        "$SCRIPT_DIR"/system/gpu-capture/logrotate-sysmon.in > /etc/logrotate.d/sysmon
+    systemctl --user --machine="$SUDO_USER@.host" daemon-reload || true
+    systemctl --user --machine="$SUDO_USER@.host" restart sysmon.service || true
+fi
+
+# =============================================================================
 banner "Finalizing"
 # =============================================================================
 
