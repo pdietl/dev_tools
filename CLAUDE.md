@@ -106,6 +106,15 @@ The repo `system/suspend/p16-gen3/` set was applied to this install 2026-07-18
 `gdfuse-suspend-guard` and repo `system/journal-hygiene/` carried over from the
 T16 era (applied 2026-07-12).
 
+### dGPU scanout-allocation refusal (instrumented 2026-08-08)
+Panel static plus an unusable-laggy desktop, triggered by **display
+reconfiguration** (lid open/close, hotplug, undock) rather than suspend — so
+none of the four suspend modes apply and chasing them wastes time. Same doc,
+section "Display glitch / laggy desktop". Why the dGPU refuses the allocation
+is still open; `/etc/modprobe.d/nvidia-modeset-debug.conf` (`nvidia_modeset
+debug=1`, hand-applied, **not** installed by `provision`) is armed to capture
+the reason, and `bin/sysmon.sh` now logs free/reserved framebuffer.
+
 ### Crash capture (applied 2026-07-25)
 Two hard hangs in two days (2026-07-24 reboot teardown, 2026-07-25 idle),
 both docked with the lid closed and two USB-C externals on the dGPU, both

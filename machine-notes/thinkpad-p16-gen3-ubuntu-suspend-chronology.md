@@ -110,3 +110,18 @@ never as a source of facts to act on.
   only the dmesg pstore front-end (no console/pmsg/ftrace), and the panic
   notifier chain here is six benign entries — nothing that can hang before
   the dump.
+- **2026-08-08** — panel static plus an unusable-laggy desktop after a
+  13½ hour suspend and a redock onto HDMI. Traced to the dGPU refusing
+  scanout NVKMS allocations, with mutter's front-buffer failures and
+  Chrome's BO failures both downstream of it; a matching 2026-07-29
+  occurrence turned out to be an *undock*, which is what established the
+  trigger as output reconfiguration rather than suspend. Two hypotheses
+  formed and killed on the way: that the dGPU had runtime-suspended
+  (`Using 41-bit DMA addresses` appearing exactly once in six boots looked
+  like an RTD3 resume — refuted by `runtime_suspended_time: 0`, and that
+  line remains unexplained, being absent from both the nvidia sources and
+  the binary blobs), and that the `-EINVAL` returned to callers ruled out
+  exhaustion — refuted by reading the driver, which returns `-EINVAL` for
+  every cause including out-of-memory. Left instrumented rather than
+  fixed: the underlying reason for the refusal is still unknown, with
+  display-bandwidth (IMP) arbitration the leading candidate.

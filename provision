@@ -259,6 +259,7 @@ declare -a packages=(
     libzint-dev
     libzstd-dev
     linux-tools-generic
+    lm-sensors
     lua5.1
     luarocks
     m4
@@ -310,6 +311,7 @@ declare -a packages=(
     sshpass
     strace
     swig
+    sysstat
     texinfo
     tmate
     tmux

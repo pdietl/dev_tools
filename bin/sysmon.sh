@@ -1,22 +1,34 @@
 #!/usr/bin/env bash
 # sysmon.sh — 1 Hz system monitor for screen + file logging
 # Usage: ./sysmon.sh [logfile]
-# Requires: lm-sensors, sysstat (mpstat), nvidia-driver
+# Requires: sysstat (mpstat).  Optional: lm-sensors, nvidia-driver
 
 set -euo pipefail
 
 LOGFILE="${1:-sysmon_$(date +%Y%m%d_%H%M%S).csv}"
 
 # --- dependency check ---
-for cmd in mpstat sensors nvidia-smi; do
+# mpstat alone is required: the per-CPU column count is derived from its
+# output, so without it every row would disagree with the header. The sensor
+# and GPU fields already fall back to "-", so those tools being absent must
+# not stop a run that can still log everything else.
+if ! command -v mpstat &>/dev/null; then
+    echo "Missing required: mpstat" >&2
+    echo "  sudo apt install sysstat" >&2
+    exit 1
+fi
+
+for cmd in sensors nvidia-smi; do
     if ! command -v "$cmd" &>/dev/null; then
-        echo "Missing: $cmd"
         case "$cmd" in
-            mpstat)     echo "  sudo apt install sysstat" ;;
-            sensors)    echo "  sudo apt install lm-sensors && sudo sensors-detect" ;;
-            nvidia-smi) echo "  Install NVIDIA drivers" ;;
+            sensors)
+                echo "Note: sensors absent — temp and fan columns will be '-'" >&2
+                echo "  sudo apt install lm-sensors && sudo sensors-detect" >&2
+                ;;
+            nvidia-smi)
+                echo "Note: nvidia-smi absent — GPU columns will be '-'" >&2
+                ;;
         esac
-        exit 1
     fi
 done
 
@@ -27,7 +39,8 @@ HEADER="timestamp,cpu_total_pct"
 for ((i=0; i<NCPU; i++)); do HEADER+=",cpu${i}_pct"; done
 HEADER+=",mem_used_mb,mem_total_mb,mem_pct"
 HEADER+=",tctl_c,tdie_c,tccd1_c,tccd2_c"
-HEADER+=",gpu_temp_c,gpu_util_pct,gpu_mem_mb,gpu_power_w"
+HEADER+=",gpu_temp_c,gpu_util_pct,gpu_mem_used_mb,gpu_power_w"
+HEADER+=",gpu_mem_free_mb,gpu_mem_total_mb,gpu_mem_reserved_mb"
 HEADER+=",fan_info"
 
 echo "$HEADER" | tee "$LOGFILE"
@@ -62,12 +75,15 @@ while true; do
         END { printf "%s,%s,%s,%s\0", tctl, tdie, tccd1, tccd2 }
     ') || true
 
-    # GPU stats — awk provides defaults if nvidia-smi produces no output
+    # GPU stats — awk provides defaults if nvidia-smi produces no output.
+    # Free and reserved framebuffer are logged beside used because a scanout
+    # allocation that video memory cannot satisfy fails outright — that path
+    # has no system-memory fallback — so headroom is what explains a refusal.
     read -r -d '' GPU_CSV < <(nvidia-smi \
-        --query-gpu=temperature.gpu,utilization.gpu,memory.used,power.draw \
+        --query-gpu=temperature.gpu,utilization.gpu,memory.used,power.draw,memory.free,memory.total,memory.reserved \
         --format=csv,noheader,nounits 2>/dev/null \
         | awk '
-            BEGIN { out="-,-,-,-" }
+            BEGIN { out="-,-,-,-,-,-,-" }
             NF { gsub(/ /,""); out=$0 }
             END { printf "%s\0", out }
         ') || true

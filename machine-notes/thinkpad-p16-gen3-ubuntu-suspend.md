@@ -834,6 +834,96 @@ once rather than assume it.
 
 ---
 
+## Display glitch / laggy desktop: NVKMS refuses scanout allocations
+
+A fourth lifecycle event in the dGPU display path, and the first one that
+leaves a usable log trail. Unlike the three above it is not fatal — it
+clears on its own — but it is disruptive while it lasts.
+
+**Symptom (first seen 2026-07-29, again 2026-08-08):** static and glitching
+over an otherwise working desktop or login screen, and with the lid closed
+input lags badly enough to be unusable. Opening the lid clears it.
+
+**What is happening.** The dGPU refuses scanout-type memory allocations:
+
+```
+[drm:nv_drm_gem_alloc_nvkms_memory_ioctl [nvidia_drm]] *ERROR*
+  [nvidia-drm] [GPU ID 0x00000100] Failed to allocate NVKMS memory for GEM object
+```
+
+With no buffer to draw into, mutter cannot lock a front buffer
+(`Failed to lock front buffer on /dev/dri/cardN: gbm_surface_lock_front_buffer
+failed`) and so cannot page-flip; its atomic commits then fail with
+`drmModeAtomicCommit: Invalid argument`. A CRTC with nothing replacing its
+framebuffer keeps scanning out whatever it last held — that is the static,
+and `NVreg_PreserveVideoMemoryAllocations=0` means those contents are
+undefined after a resume. The lag is the absence of presented frames, not
+CPU exhaustion. Chrome's GPU process fails on the same path
+(`Cannot create bo with format=RGBA_8888 and usage=Scanout|Rendering|Texturing`).
+
+**Scanout allocations have no fallback.** In
+`nvidia-drm/nvidia-drm-gem-nvkms-memory.c`, an offscreen (`NO_SCANOUT`)
+allocation that video memory cannot satisfy is retried against system
+memory; a scanout allocation is not. Any refusal is fatal to that caller on
+the first attempt.
+
+**The errno carries no information.** That same path returns `-EINVAL` for
+every cause, genuine out-of-memory included, and logs the one generic
+message above. Do not read `EINVAL` here as "malformed request".
+
+**The trigger is output reconfiguration, not suspend.** It fires on lid
+open/close, display hotplug and undock — the 2026-07-29 occurrence was an
+undock with no suspend anywhere near it. Both occurrences are immediately
+preceded by mutter's monitor list changing under it (`Monitor 'Built-in
+display' has no configuration which is-current!`, plus
+`meta_monitor_manager_get_logical_monitor_from_number` assertion failures).
+When it fires the freezer, i915 PHY and igc paths are all clean: this is
+**not** one of the four failure modes above, and chasing those wastes time.
+
+**Why it is refused is not established.** Free framebuffer was ample, system
+memory was not under pressure, and no Xid was raised. The modeset driver
+carries an IMP ("Is Mode Possible") display-bandwidth subsystem whose
+failure strings include `Failed to allocate %u KBPS Iso and %u KBPS Dram`
+and `Unexpectedly failed to program post-modeset bandwidth!`. Bandwidth
+arbitration refusing a reconfiguration would fit — two 4K-class heads on one
+laptop dGPU, failing only at topology changes — but that is a candidate, not
+a finding.
+
+### Instrumentation
+
+`/etc/modprobe.d/nvidia-modeset-debug.conf` — hand-applied and
+self-documenting, not installed by `provision`:
+
+```
+options nvidia_modeset debug=1
+```
+
+The closed modeset blob imports `nvkms_debug_logging` as an undefined
+symbol, so the release build honours this knob rather than having debug
+output compiled out, and `nvkms_log()` is itself ungated and prints straight
+to the journal prefixed `nvidia-modeset: `. It measured silent on an idle
+desktop, so it is safe to leave armed. No initrd regeneration is needed: no
+nvidia module is in the initramfs, so the option is read when the module
+loads from the root filesystem.
+
+The other modeset parameters are dead ends — `malloc_verbose` is read-only
+at runtime and reports only at module unload, `fail_malloc` is fault
+injection, and `ResmanDebugLevel`/`RmMsg` are resman-level with no value
+semantics documented in `nv-reg.h`.
+
+`bin/sysmon.sh` logs free, total and reserved framebuffer beside used, so a
+run captured across an occurrence shows whether headroom was actually gone.
+
+Reading it back:
+
+```bash
+journalctl -b -k | grep 'NVKMS memory'      # the refusals
+journalctl -b    | grep 'lock front buffer' # mutter's fallout
+journalctl -b -k | grep 'nvidia-modeset:'   # the reason, once debug=1
+```
+
+---
+
 ## Investigation chronology
 
 Lives in `thinkpad-p16-gen3-ubuntu-suspend-chronology.md` — session-dated
