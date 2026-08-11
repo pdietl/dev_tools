@@ -1229,6 +1229,21 @@ else
     installUser "$USER_HOME"/.config "$SCRIPT_DIR"/dotfiles/starship.toml
 fi
 
+declare -r SHELL_PREFS_BANNER='# Shell preferences'
+if [ -e "$USER_RC" ] && grep -q -F "$SHELL_PREFS_BANNER" "$USER_RC"; then
+    echo "  Shell preferences: already configured"
+else
+    echo "  Shell preferences: configuring"
+    (
+        echo
+        echo "$SHELL_PREFS_BANNER"
+        echo 'shopt -s nullglob globstar'
+        echo "export HISTTIMEFORMAT='%F %T '"
+        echo 'export EDITOR=nvim'
+    ) >> "$USER_RC"
+    _chown "$SUDO_USER:$SUDO_USER" "$USER_RC"
+fi
+
 echo
 echo "Done!"
 
