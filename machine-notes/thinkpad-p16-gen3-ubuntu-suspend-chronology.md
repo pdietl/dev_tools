@@ -125,3 +125,26 @@ never as a source of facts to act on.
   every cause including out-of-memory. Left instrumented rather than
   fixed: the underlying reason for the refusal is still unknown, with
   display-bandwidth (IMP) arbitration the leading candidate.
+- **2026-08-22** — the machine rebooted itself mid-use. Not a hang: the
+  archived record was `Kernel panic - not syncing: hung_task: blocked
+  tasks`, a thread blocked 327 s in `fuse_lookup` behind a mutex held by
+  `localsearch-3`, which was itself waiting on the gdfuse daemon. First
+  firing of the crash-capture stack on an unplanned fault, and the panic
+  was the configured response to the stall rather than a fault of its own —
+  the machine was idle and healthy on every other axis. Traced to the
+  indexer exclusion naming `mnt`, which was correct while the mount lived
+  at `~/mnt/GoogleDrive` and had matched nothing since the auto-mount unit
+  standardised on `%h/GoogleDrive`. A same-week panic (2026-08-17, `sync`
+  blocked in `wb_wait_for_completion`, no FUSE frames) is the same
+  mechanism on a different stall and was left unattributed. Two hypotheses
+  formed and killed: that the exclusion mechanism itself was broken —
+  refuted by the indexer sources, where filters are matched on the basename
+  and absolute paths are rejected outright, so the `$HOME/GoogleDrive` form
+  that looked like the fix would have been accepted by gsettings and done
+  nothing; and that the indexer was still crawling the mount afterwards —
+  refuted by stopping the service and watching the Drive traffic continue,
+  which attributed it to an open file-manager window and a PDF viewer. Both
+  wrong readings came from a predicate narrower than the question (one
+  subdirectory grepped for, a startup marker reused across a changed output
+  mode), which is also why the gdfuse operation log was added: without a
+  record of what the daemon was asked for, attribution was guesswork.

@@ -677,6 +677,12 @@ backtrace and tail. (The sysrq trigger works despite `kernel.sysrq=176`
 lacking the `SYSRQ_ENABLE_DUMP` bit, because writes to
 `/proc/sysrq-trigger` bypass the mask.)
 
+**And by an unplanned fault (2026-08-22):** mechanism 1 fired on a stalled
+FUSE mount rather than a synthetic trigger, the next boot's archive held the
+complete 29-part record with the blocking stacks intact, and the machine
+self-rebooted on `kernel.panic=60`. Mechanisms 1 and 3 are proven on a real
+event, not only a deliberate one.
+
 ### kdump is disabled — a broken capture kernel is worse than none
 
 **Do not re-enable kdump without first fixing the capture kernel.** A
@@ -831,6 +837,65 @@ One behaviour to watch on the first long suspend: `iTCO_wdt` carries
 `suspend_noirq`/`resume_noirq` hooks that stop the counter across sleep, so
 an armed watchdog should not reset a suspended machine — but confirm it
 once rather than assume it.
+
+---
+
+## Self-inflicted reboot: `hung_task_panic` on a stalled Drive mount
+
+**2026-08-22, 18:32.** Not a hardware fault: the machine was idle and healthy
+when it went down. The 10 s sampler covers the whole descent — CPU 1-2%, RAM
+23.5%, dGPU 43 C at 0% util and 9 W, no NVKMS refusal, no suspend involved.
+One thread had been parked in D state on the `~/GoogleDrive` FUSE mount for
+327 s, past `hung_task_timeout_secs=300`, so `khungtaskd` panicked exactly as
+mechanism 1 is configured to and `kernel.panic=60` rebooted 60 s later.
+
+The lock chain, from the archived `Panic#1` record:
+
+```
+task <app thread>   state:D  statx() -> fuse_lookup -> fuse_lock_inode
+                             -> mutex_lock                <- blocked 327 s
+  "is blocked on a mutex likely owned by task localsearch-3"
+task localsearch-3  state:S  openat() -> fuse_atomic_open -> fuse_lookup_name
+                             -> __fuse_simple_request
+                             -> request_wait_answer       <- daemon never answered
+```
+
+Read it upward: the gdfuse daemon stopped answering a LOOKUP. LocalSearch was
+inside `fuse_lock_inode` when that happened and held the inode mutex across
+the stall, so the next process to touch that directory inherited the wait in
+uninterruptible sleep. **LocalSearch is in `S` state and so never appears as a
+hung task — only as the mutex owner.** Read a hung-task report for the owner,
+not for the task it names.
+
+The indexer was in the mount because `provision`'s exclusion named a directory
+the mount no longer used. Fixed in-tree: the mountpoint's name has a single
+definition and a run aborts if the mount unit disagrees with it.
+
+Standing conditions:
+
+- `hung_task_panic=1` turns *any* 300 s D-state task into a whole-machine
+  reboot, and a network filesystem can reach that without anything being
+  broken. It stays armed because the dGPU hang leaves no other evidence; the
+  price is that a Drive stall reboots the machine.
+- An exclusion does not purge what is already indexed. Clear a stale subtree
+  with `localsearch reset -f ~/GoogleDrive`. The delete is **asynchronous** —
+  it reports success while the entries are still queryable, so read back with
+  `localsearch search -s <term>` rather than trusting the message.
+- Indexer filter entries match the **basename** only. Absolute paths are
+  rejected by the indexer but accepted by `gsettings`, so a path-shaped entry
+  looks applied and excludes nothing.
+
+`~/.local/state/gdfuse/gdfuse.log` records every Drive operation as a
+BEGIN/END pair (the mount unit passes `-verbose -log_to -`). It is what
+attributes traffic to a path and shows a request that never came back;
+without it the daemon side of a stall is unrecorded.
+
+**Attribution trap:** a file manager browsing the mount, or a document viewer
+holding a file open from it, produces the same recursive walk and the same
+`.git` / `HEAD` probes as an indexer crawl. Sampling `/proc/*/cwd` and
+`/proc/*/fd` sees only processes holding a path at that instant and misses a
+crawler between syscalls. Stop the indexer and check whether the traffic
+stops.
 
 ---
 
