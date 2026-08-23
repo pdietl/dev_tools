@@ -21,6 +21,11 @@ SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_SRC")" > /dev/null 2>&1 && pwd)
 
 declare -r USER_HOME=/home/$SUDO_USER
 declare -r USER_RC=$USER_HOME/.bashrc
+# Directory name of the Drive mountpoint, defined once: the home-directory list
+# below, the mount unit, and the file indexer's exclusion list must all name the
+# same directory. The unit spells it with systemd's %h and so cannot read this;
+# the gdfuse section asserts the two agree before installing it.
+declare -r GDFUSE_MOUNT_NAME=GoogleDrive
 declare -a path_additions=('"$HOME"/bin' '"$HOME"/.local/bin')
 
 # ---------------------------------------------------------------------------
@@ -666,7 +671,7 @@ rm -rf "$USER_HOME"/{Public,Templates,Music}
 declare -a dir_list=(
     "$USER_HOME"/Applications
     "$USER_HOME"/Downloads
-    "$USER_HOME"/GoogleDrive
+    "$USER_HOME/$GDFUSE_MOUNT_NAME"
     "$USER_HOME"/Learn
     "$USER_HOME"/Repos
 )
@@ -853,6 +858,19 @@ echo "  Mount prewarm: installed $GDFUSE_PREWARM"
 # a stalled FUSE connection, and the unit's Restart=always remounts after
 # crashes. A ConditionPathExists keeps it inert until the one-time OAuth
 # setup has been done (recipe printed at the end of the run).
+
+# The unit has to spell the mountpoint out with systemd's %h, so it cannot
+# derive it from $GDFUSE_MOUNT_NAME. Refuse to install one that mounts somewhere
+# else: the indexer exclusion below is built from $GDFUSE_MOUNT_NAME, and an
+# exclusion that no longer names the mountpoint stops matching silently, leaving
+# the crawler free to walk the mount.
+if ! grep -qE "^ExecStart=.*[[:space:]]%h/${GDFUSE_MOUNT_NAME}\$" \
+    "$SCRIPT_DIR/dotfiles/$GDFUSE_UNIT"; then
+    echo "provision: $GDFUSE_UNIT does not mount %h/$GDFUSE_MOUNT_NAME." >&2
+    echo "           Change GDFUSE_MOUNT_NAME and the unit together." >&2
+    exit 1
+fi
+
 gdfuse_unit_dir=$USER_HOME/.config/systemd/user
 if cmp -s "$SCRIPT_DIR/dotfiles/$GDFUSE_UNIT" "$gdfuse_unit_dir/$GDFUSE_UNIT"; then
     echo "  User unit: already current"
@@ -1133,18 +1151,22 @@ else
             "$SCRIPT_DIR"/system/journal-hygiene/localsearch-suppress-journal-spam.conf
         sed "s|@USER@|$SUDO_USER|g; s|@USER_HOME@|$USER_HOME|g" \
             "$SCRIPT_DIR"/system/journal-hygiene/logrotate-localsearch.in > /etc/logrotate.d/localsearch
-        systemctl --user --machine="$SUDO_USER@.host" daemon-reload || true
-        systemctl --user --machine="$SUDO_USER@.host" try-restart localsearch-3.service || true
         # Keep the indexer out of network-FUSE mounts under $HOME: gdfuse
         # serves incomplete GIO metadata (steady GLib warnings), and an
         # indexer read in flight when the network drops leaves an
         # unfreezable D-state task that wedges suspend (see the machine
         # suspend docs). Entries are basename globs — absolute paths are
-        # NOT matched — so this excludes any directory named 'mnt'.
+        # NOT matched — so '$GDFUSE_MOUNT_NAME' excludes the Drive mountpoint
+        # wherever it sits, and 'mnt' covers anything mounted under ~/mnt.
         if command -v gsettings > /dev/null; then
             gsettings_set org.freedesktop.Tracker3.Miner.Files ignored-directories \
-                "['po', 'CVS', 'core-dumps', 'lost+found', 'mnt']"
+                "['po', 'CVS', 'core-dumps', 'lost+found', 'mnt', '$GDFUSE_MOUNT_NAME']"
         fi
+        # After the exclusion, not before: a crawl already in flight keeps the
+        # directory list it started with, so an indexer restarted first stays on
+        # the old one until the next login.
+        systemctl --user --machine="$SUDO_USER@.host" daemon-reload || true
+        systemctl --user --machine="$SUDO_USER@.host" try-restart localsearch-3.service || true
     else
         echo "  LocalSearch: not installed, skipping"
     fi

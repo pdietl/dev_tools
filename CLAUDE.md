@@ -69,9 +69,12 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
     plus an hourly logrotate timer override so the size caps actually bind,
     and a journald drop-in (20G persistent cap, 256M files, per-service flood
     backstop of 1000 msgs/10s).
-    Also excludes `mnt` dirs from LocalSearch indexing (basename glob —
-    absolute paths aren't matched) so the indexer stays off network-FUSE
-    mounts.
+    Also keeps LocalSearch off network-FUSE mounts by excluding the Drive
+    mountpoint and `mnt` (basename globs — absolute paths aren't matched). The
+    mountpoint's directory name is defined once in `provision` as
+    `GDFUSE_MOUNT_NAME`; the home-directory list and this exclusion both derive
+    from it, and `provision` refuses to install a mount unit whose `ExecStart`
+    names a different directory, so the two cannot drift apart unnoticed.
 - **`machine-notes/`** — machine-fix notes, one markdown file per machine:
   `thinkpad-p16-gen3-ubuntu-suspend.md`, `thinkpad-t16-gen4-ubuntu-suspend.md`.
   Follow that model for new machines. Notes hold **current state only**; the
