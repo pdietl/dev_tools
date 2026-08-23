@@ -871,21 +871,37 @@ if ! grep -qE "^ExecStart=.*[[:space:]]%h/${GDFUSE_MOUNT_NAME}\$" \
     exit 1
 fi
 
+# The unit's StandardOutput=append: target must exist before the unit starts:
+# systemd wires up stdout before ExecStartPre could create it.
+installUser "$USER_HOME"/.local/state/gdfuse
+
 gdfuse_unit_dir=$USER_HOME/.config/systemd/user
+gdfuse_unit_changed=false
 if cmp -s "$SCRIPT_DIR/dotfiles/$GDFUSE_UNIT" "$gdfuse_unit_dir/$GDFUSE_UNIT"; then
     echo "  User unit: already current"
 else
     installUser "$gdfuse_unit_dir" "$SCRIPT_DIR/dotfiles/$GDFUSE_UNIT"
     echo "  User unit: installed $GDFUSE_UNIT"
+    gdfuse_unit_changed=true
 fi
 # Enable without needing the user's session bus: create the same symlink
 # `systemctl --user enable` would.
 installUser "$gdfuse_unit_dir/default.target.wants"
 ln -sfn "../$GDFUSE_UNIT" "$gdfuse_unit_dir/default.target.wants/$GDFUSE_UNIT"
 _chown -h "$SUDO_USER":"$SUDO_USER" "$gdfuse_unit_dir/default.target.wants/$GDFUSE_UNIT"
+# The unit appends -verbose output here, so cap what it writes.
+sed "s|@USER@|$SUDO_USER|g; s|@USER_HOME@|$USER_HOME|g" \
+    "$SCRIPT_DIR"/system/gdfuse/logrotate-gdfuse.in > /etc/logrotate.d/gdfuse
+echo "  Log rotation: /etc/logrotate.d/gdfuse"
 # Pick up unit changes now if a session is running; start is a condition-skip
 # no-op until OAuth is set up, and a no-op if already mounted.
 systemctl --user --machine="$SUDO_USER@.host" daemon-reload 2> /dev/null || true
+# A changed ExecStart only reaches a live mount through a restart, and a restart
+# drops the FUSE connection -- anything holding a path under it sees EIO once --
+# so restart only when the unit actually changed.
+if [ "$gdfuse_unit_changed" = true ]; then
+    systemctl --user --machine="$SUDO_USER@.host" try-restart "$GDFUSE_UNIT" 2> /dev/null || true
+fi
 systemctl --user --machine="$SUDO_USER@.host" start "$GDFUSE_UNIT" 2> /dev/null || true
 
 # =============================================================================

@@ -22,7 +22,12 @@ Type=exec
 ExecStartPre=-/usr/bin/fusermount3 -uz %h/GoogleDrive
 ExecStartPre=/usr/bin/mkdir -p %h/GoogleDrive
 # gdfuse >= 0.9 always runs in the foreground (libfuse -f is hardwired).
-ExecStart=/usr/local/bin/google-drive-ocamlfuse -label default %h/GoogleDrive
+# -verbose records every Drive operation as a BEGIN/END pair, which is what
+# identifies a request the daemon stopped answering. Deliberately not -debug:
+# that adds curl wire tracing, which writes OAuth Authorization headers into a
+# plaintext log. "-log_to -" is stdout: -verbose alone writes the trace to
+# gdfuse's own log file instead, and that file is truncated on every start.
+ExecStart=/usr/local/bin/google-drive-ocamlfuse -label default -verbose -log_to - %h/GoogleDrive
 # Pay the cold getattr on the Drive root here rather than leaving it to
 # whatever first stats $HOME after login. systemd-run keeps it off this unit's
 # critical path: the suspend guard restarts this unit from a system-sleep
@@ -34,6 +39,16 @@ ExecStop=/usr/bin/fusermount3 -u %h/GoogleDrive
 # (5 starts / 10 s) from ever tripping while the network is down.
 Restart=always
 RestartSec=10
+# Keep the trace out of the journal, whose per-service rate limit drops exactly
+# the burst worth having. append: also makes the record survive a restart, which
+# writing to a file directly does not: gdfuse truncates whatever log file it
+# opens, so Restart=always and the suspend guard's restart would each erase the
+# record of what preceded them. O_APPEND is also what makes copytruncate safe.
+# The target directory must already exist (provision creates it): systemd wires
+# up stdout before ExecStartPre runs, so append: into a missing directory fails
+# the unit. Size-capped rotation lives in /etc/logrotate.d/gdfuse.
+StandardOutput=append:%h/.local/state/gdfuse/gdfuse.log
+StandardError=append:%h/.local/state/gdfuse/gdfuse.log
 
 [Install]
 WantedBy=default.target

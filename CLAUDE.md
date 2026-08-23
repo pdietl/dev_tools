@@ -46,6 +46,10 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
     the cold getattr against Drive. Nothing on the starship side can avoid
     that cost — it has no per-path exclusion, and its `scan_timeout` is checked
     between directory entries, so it cannot abort a getattr already in flight.
+    Also `logrotate-gdfuse.in`, capping the log the mount unit appends `-verbose`
+    output to. `-debug` is deliberately unused: its curl tracing would put OAuth
+    headers in a plaintext file. The redirect is systemd `append:`, not gdfuse's
+    `-log_to`, which truncates on every daemon start.
   - **`system/gpu-capture/`** — instrumentation for the dGPU scanout-allocation
     refusal: `nvkms-refusal-snapshot` (+ its unit) captures GPU state at the
     moment of a refusal, since the driver reports every cause identically, and

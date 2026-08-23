@@ -1,0 +1,14 @@
+# Size-capped rotation for the google-drive-ocamlfuse log (see the user unit
+# ~/.config/systemd/user/google-drive-ocamlfuse.service, which passes -log_to).
+# Template: provision substitutes @USER@/@USER_HOME@ and installs as
+# /etc/logrotate.d/gdfuse. su because the file is user-owned; copytruncate
+# because the daemon holds the fd open for the life of the mount.
+@USER_HOME@/.local/state/gdfuse/gdfuse.log {
+    su @USER@ @USER@
+    size 20M
+    rotate 5
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
