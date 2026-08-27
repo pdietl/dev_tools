@@ -16,7 +16,12 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   the only top-level script. **Copies** the files here into place via
   `install`/`installUser` (**not** symlinks/stow), installs apt + vendor-`.deb`
   packages, udev rules, etc. Ported to Ubuntu 26.04 (2026-06). Re-runnable.
-  `in_wsl()`-aware.
+  `in_wsl()`-aware. Authored config under `dotfiles/` and `bin/` is re-copied
+  every run, so editing a file here and re-running deploys it. Two exceptions
+  seed once and are then owned by the machine: `~/.gitconfig` (generated, not
+  copied, and may collect per-machine sections) and `starship.toml` (installed
+  inside the first-run-only bashrc block). Tool installs stay guarded on the
+  tool being absent.
 - **`dotfiles/`** — everything `provision` copies into the invoking user's
   `$HOME`: `vimrc`, `nvim/` (LazyVim), `tmux.conf`, `starship.toml`, `gdbinit`,
   `nix.conf`, `gitignore_global`, `cscope_maps.vim`, `dedup_paths.sh`

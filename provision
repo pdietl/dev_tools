@@ -527,11 +527,15 @@ else
     _wget -O /tmp/nvim.tgz https://github.com/neovim/neovim/releases/latest/download/nvim-linux-$(uname -m).tar.gz
     tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
     rm /tmp/nvim.tgz
-    installUser "$USER_HOME"/.config/nvim
-    # nvim/. rather than nvim/*: the glob would skip dotfiles (.neoconf.json)
-    _cp -r "$SCRIPT_DIR"/dotfiles/nvim/. "$USER_HOME"/.config/nvim
-    _chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.config/nvim
 fi
+
+# Refreshed on every run, independently of the binary: nvim being on PATH says
+# nothing about whether ~/.config/nvim still matches this tree.
+echo "  Neovim config: installing"
+installUser "$USER_HOME"/.config/nvim
+# nvim/. rather than nvim/*: the glob would skip dotfiles (.neoconf.json)
+_cp -r "$SCRIPT_DIR"/dotfiles/nvim/. "$USER_HOME"/.config/nvim
+_chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.config/nvim
 
 if [ -e "$USER_HOME"/.cargo/env ]; then
     echo "  Rust: already installed"
@@ -648,23 +652,15 @@ banner "Configuring system"
 echo "  Sudoers: passwordless sudo"
 sed -i 's/^%sudo.*/%sudo ALL=NOPASSWD: ALL/' /etc/sudoers
 
-if [ -e "/home/$SUDO_USER/.vimrc" ]; then
-    echo "  vimrc: already installed"
-else
-    echo "  vimrc: installing"
-    _cp "$SCRIPT_DIR"/dotfiles/vimrc "$USER_HOME"/.vimrc
-    _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.vimrc
-    installUser "$USER_HOME"/.vim/pack/plugins/start/cscope/plugin/ "$SCRIPT_DIR"/dotfiles/cscope_maps.vim
-    installUser "$USER_HOME"/.vim/spell
-fi
+echo "  vimrc: installing"
+_cp "$SCRIPT_DIR"/dotfiles/vimrc "$USER_HOME"/.vimrc
+_chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.vimrc
+installUser "$USER_HOME"/.vim/pack/plugins/start/cscope/plugin/ "$SCRIPT_DIR"/dotfiles/cscope_maps.vim
+installUser "$USER_HOME"/.vim/spell
 
-if [ -e "/home/$SUDO_USER/.tmux.conf" ]; then
-    echo "  tmux.conf: already installed"
-else
-    echo "  tmux.conf: installing"
-    _cp "$SCRIPT_DIR"/dotfiles/tmux.conf "$USER_HOME"/.tmux.conf
-    _chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux.conf
-fi
+echo "  tmux.conf: installing"
+_cp "$SCRIPT_DIR"/dotfiles/tmux.conf "$USER_HOME"/.tmux.conf
+_chown "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.tmux.conf
 
 echo "  Cleaning up home directories..."
 rm -rf "$USER_HOME"/{Public,Templates,Music}
@@ -714,14 +710,14 @@ echo "  Git remote: updating origin to SSH"
 (cd "$SCRIPT_DIR" && git remote set-url origin git@github.com:pdietl/dev_tools.git)
 
 declare -r BIN_DEST=$USER_HOME/bin
-if [ -e "$BIN_DEST" ]; then
-    echo "  User binaries: already installed"
-else
-    echo "  User binaries: installing to $BIN_DEST"
-    _mkdir -p "$BIN_DEST"
-    _cp -r "$SCRIPT_DIR"/bin/* "$BIN_DEST"
-    _chown "$SUDO_USER:$SUDO_USER" -R "$BIN_DEST"
-fi
+echo "  User binaries: installing to $BIN_DEST"
+_mkdir -p "$BIN_DEST"
+# --remove-destination unlinks before writing, so each script lands on a new
+# inode. Overwriting in place corrupts any of these already running under a
+# systemd unit: bash reads a script incrementally and would resume at an offset
+# that now holds different text.
+_cp -r --remove-destination "$SCRIPT_DIR"/bin/* "$BIN_DEST"
+_chown "$SUDO_USER:$SUDO_USER" -R "$BIN_DEST"
 
 if [ -e "$USER_HOME/.gitconfig" ]; then
     echo "  gitconfig: already installed"
@@ -736,9 +732,12 @@ else
 [init]
     defaultBranch = main' > "$USER_HOME/.gitconfig"
     _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.gitconfig"
-    _cp "$SCRIPT_DIR"/dotfiles/gitignore_global "$USER_HOME"/.gitignore_global
-    _chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.gitignore_global
 fi
+
+# Outside the gate above: .gitconfig is generated once because it may collect
+# per-machine sections, whereas this one is copied verbatim from this tree.
+_cp "$SCRIPT_DIR"/dotfiles/gitignore_global "$USER_HOME"/.gitignore_global
+_chown "$SUDO_USER:$SUDO_USER" "$USER_HOME"/.gitignore_global
 
 add_user_to_group "$SUDO_USER" dialout
 add_user_to_group "$SUDO_USER" plugdev
