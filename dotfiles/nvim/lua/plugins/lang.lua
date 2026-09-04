@@ -49,18 +49,12 @@ return {
     },
   },
 
-  -- Ada formats with gnatpp (from libadalang-tools) rather than via the LSP.
-  -- Markdown formats with nothing: prose is hand-wrapped, and the markdown
-  -- extra's chain (prettier, markdownlint --fix) rewrites it on every save.
+  -- Use gnatpp (from libadalang-tools) for Ada formatting instead of LSP.
   {
     "stevearc/conform.nvim",
     opts = {
       formatters_by_ft = {
         ada = { "gnatpp" },
-        -- An empty list, not a nil: LazyVim's opts merge replaces list values,
-        -- so this clears the inherited chain instead of appending to it.
-        markdown = {},
-        ["markdown.mdx"] = {},
       },
       formatters = {
         gnatpp = {
