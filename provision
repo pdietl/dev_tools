@@ -532,10 +532,26 @@ fi
 # Refreshed on every run, independently of the binary: nvim being on PATH says
 # nothing about whether ~/.config/nvim still matches this tree.
 echo "  Neovim config: installing"
-installUser "$USER_HOME"/.config/nvim
-# nvim/. rather than nvim/*: the glob would skip dotfiles (.neoconf.json)
-_cp -r "$SCRIPT_DIR"/dotfiles/nvim/. "$USER_HOME"/.config/nvim
-_chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.config/nvim
+declare -r NVIM_CONFIG=$USER_HOME/.config/nvim
+# nvim writes these itself (:LazyExtras, :Lazy), so a machine owns them once it
+# has them and this tree only seeds a new one; refreshing them would revert
+# extras toggled and plugins updated from inside the editor.
+declare -ra NVIM_SEEDED=(lazyvim.json lazy-lock.json)
+declare -a nvim_excludes=()
+for f in "${NVIM_SEEDED[@]}"; do
+    nvim_excludes+=("--exclude=./$f")
+done
+installUser "$NVIM_CONFIG"
+# Streamed rather than copied so the seeded files are never overwritten, not
+# even briefly; '.' rather than '*' because the glob would skip .neoconf.json.
+tar -C "$SCRIPT_DIR"/dotfiles/nvim -cf - "${nvim_excludes[@]}" . |
+    tar -C "$NVIM_CONFIG" -xf -
+for f in "${NVIM_SEEDED[@]}"; do
+    if [ ! -e "$NVIM_CONFIG/$f" ]; then
+        _cp "$SCRIPT_DIR"/dotfiles/nvim/"$f" "$NVIM_CONFIG"/"$f"
+    fi
+done
+_chown -R "$SUDO_USER":"$SUDO_USER" "$NVIM_CONFIG"
 
 if [ -e "$USER_HOME"/.cargo/env ]; then
     echo "  Rust: already installed"
