@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# tpm-fde-probe — after a boot of an Ubuntu TPM-FDE machine, pull the TPM event
+# log, PCR values, LUKS tokens and snapd's boot-chains over SSH and report
+# whether the firmware measures a driver into PCR 2 after the separator and
+# whether the policy snapd resealed on that boot matches the live registers.
+#
+# Usage:  tpm-fde-probe user@host [luks-device]     (default /dev/nvme0n1p5)
+#
+# Needs passwordless sudo on the target. Each run lands in
+# ~/.local/state/tpm-fde-probe/<timestamp>/ and is never overwritten.
+# Loop: change one firmware setting -> boot (recovery key) -> run this.
+# "next boot should unseal ... YES" means the next boot should take the passphrase.
+set -euo pipefail
+
+host=${1:?usage: tpm-fde-probe user@host [luks-device]}
+luks=${2:-/dev/nvme0n1p5}
+here=$(cd "$(dirname "$0")" && pwd)
+run=$HOME/.local/state/tpm-fde-probe/$(date +%Y%m%dT%H%M%S)
+mkdir -p "$run"
+ssh_() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" "$@"; }
+
+ssh_ 'sudo cat /sys/kernel/security/tpm0/binary_bios_measurements' > "$run/log.bin"
+ssh_ 'systemd-analyze pcrs' | awk '$1 ~ /^[0-9]+$/ {print $1, $NF}' > "$run/pcrs.txt"
+ssh_ 'sudo cat /var/lib/snapd/device/fde/boot-chains' > "$run/boot-chains.json"
+ssh_ "sudo cryptsetup token export --token-id 2 $luks" > "$run/token2.json"
+ssh_ "sudo cryptsetup token export --token-id 3 $luks" > "$run/token3.json"
+ssh_ 'uptime -s; sudo dmidecode -s bios-version; journalctl -b 2>/dev/null | grep -c "not authorized for the current configuration" || true' \
+  > "$run/boot.txt"
+[[ -s $run/log.bin && -s $run/pcrs.txt && -s $run/token2.json ]] \
+  || { echo "error: collection incomplete, see $run" >&2; exit 1; }
+
+echo "run: $run"
+echo "booted: $(sed -n 1p "$run/boot.txt")   BIOS: $(sed -n 2p "$run/boot.txt")   unseal errors this boot: $(sed -n 3p "$run/boot.txt")"
+echo
+echo "PCR2 events in log order (S = separator):"
+python3 "$here/tcglog.py" "$run/log.bin" 2 --json "$run/events.json" \
+  | awk '{ tag = ($2 == "SEPARATOR") ? "S" : " "; printf "  %s %s %s\n", tag, $2, substr($3, 1, 16) }'
+post=$(python3 - "$run/events.json" <<'PY'
+import json, sys
+ev = [e for e in json.load(open(sys.argv[1])) if e["pcr"] == 2]
+sep = next((i for i, e in enumerate(ev) if e["type"] == 4), None)
+print("n/a" if sep is None else len(ev) - sep - 1)
+PY
+)
+echo "drivers measured into PCR2 after the separator: $post"
+echo "PCR2 now: $(awk '$1 == 2 {print substr($2, 1, 16)}' "$run/pcrs.txt")…"
+prev=""
+for d in "$HOME"/.local/state/tpm-fde-probe/*/; do
+  d=${d%/}
+  [[ $d == "$run" ]] || prev=$d
+done
+if [[ -n $prev && -f $prev/pcrs.txt ]]; then
+  for p in 0 2 4 7; do
+    a=$(awk -v p="$p" '$1 == p {print $2}' "$prev/pcrs.txt"); b=$(awk -v p="$p" '$1 == p {print $2}' "$run/pcrs.txt")
+    [[ $a == "$b" ]] && s=same || s=CHANGED
+    echo "PCR$p vs previous run ($(basename "$prev")): $s"
+  done
+fi
+echo
+python3 "$here/tpm-policy-match.py" "$run/log.bin" "$run/pcrs.txt" "$run/boot-chains.json" "$run/token2.json" "$run/token3.json" \
+  | grep -vE '^MATCH:'

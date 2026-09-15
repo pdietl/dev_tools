@@ -37,6 +37,10 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   `sysmon.service` user unit — see "GPU fault capture". `kms-actual` prints
   what the kernel really scans out per connector and flags where mutter
   disagrees; run it before believing Settings after any display change.
+  `tpm-fde-probe`, `tpm-policy-match.py`, `tcglog.py` and `tpm-fde-diag.sh`
+  diagnose an Ubuntu TPM-backed-encryption install that asks for its recovery
+  key on every boot: they name the PCR whose prediction the sealed policy got
+  wrong. See `machine-notes/thinkpad-p16-gen3-ubuntu-tpm-fde.md`.
 - **`system/`** — everything `provision` installs outside `$HOME`:
   - **`system/udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP,
     picoprobe, WCH-Link, xgecu) plus two rules hiding volumes from GNOME's
@@ -90,6 +94,7 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
 - **`machine-notes/`** — machine-fix notes, one markdown file per machine and
   topic: `thinkpad-p16-gen3-ubuntu-suspend.md`,
   `thinkpad-p16-gen3-ubuntu-external-displays.md`,
+  `thinkpad-p16-gen3-ubuntu-tpm-fde.md`,
   `thinkpad-t16-gen4-ubuntu-suspend.md`. Follow that model for new machines.
   Notes hold **current state only**; the investigation narrative — including
   approaches later refuted — lives in a sibling `*-chronology.md`, which is
@@ -155,6 +160,15 @@ mode it asked for even when the driver rejected it, and a closed-lid unlock
 can leave `eDP-1` lit so every later mode-set fails. `kms-actual` is the
 read-back for both. **Read it before touching refresh rates or believing
 Settings > Displays.**
+
+### TPM-backed FDE → `machine-notes/thinkpad-p16-gen3-ubuntu-tpm-fde.md`
+Not in use on this install (ZFS root, Secure Boot off). On this model Ubuntu's
+hardware-backed encryption asks for the recovery key on every boot until
+Security ▸ Absolute Persistence Module is set to Disabled: its firmware agent
+is measured into PCR 2 after the separator, where the sealing code never
+looks. The installer's "system is in manufacturing mode" warning on this
+platform is a false positive. Both are reported upstream; the note has the
+issue numbers and the per-boot check.
 
 ### Crash capture (applied 2026-07-25)
 Two hard hangs in two days (2026-07-24 reboot teardown, 2026-07-25 idle),
