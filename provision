@@ -1204,6 +1204,49 @@ else
 fi
 
 # =============================================================================
+banner "Home-dataset ZFS snapshots"
+# =============================================================================
+
+# An independent recovery path for accidental deletes under $HOME: the
+# rollback net must not live inside the thing being mutated. zfs-auto-snapshot
+# is cron-driven (every 15 min keep 4, hourly 24, daily 31, weekly 8, monthly
+# 12; jobs in /etc/cron.d and /etc/cron.{hourly,daily,weekly,monthly}). Both
+# pools default OFF so the root, boot and bpool datasets are never snapshotted
+# (apt churn would eat the pool); only the dataset holding /home opts in.
+# Snapshots are browsable at <mountpoint>/.zfs/snapshot/<name>/ — for a
+# dataset mounted on /home that is /home/.zfs/snapshot/, not ~/.zfs — and the
+# names carry UTC time. Revert: `zfs inherit com.sun:auto-snapshot <dataset>`
+# on every dataset below and `apt-get remove zfs-auto-snapshot`.
+if in_wsl; then
+    echo "  Home snapshots: skipped (WSL)"
+elif [ "$(findmnt -n -o FSTYPE /home)" != "zfs" ]; then
+    echo "  Home snapshots: /home is not ZFS, skipping"
+else
+    HOME_DATASET=$(findmnt -n -o SOURCE /home)
+    HOME_POOL=${HOME_DATASET%%/*}
+    if ! pkg_installed zfs-auto-snapshot; then
+        _apt_get install -y zfs-auto-snapshot
+    fi
+    for pool in $(zpool list -H -o name); do
+        zfs set com.sun:auto-snapshot=false "$pool"
+    done
+    zfs set com.sun:auto-snapshot=true "$HOME_DATASET"
+    # read back: the property must be true on exactly the home dataset ...
+    if [ "$(zfs get -H -o value com.sun:auto-snapshot "$HOME_DATASET")" != "true" ] \
+        || [ "$(zfs get -H -o value com.sun:auto-snapshot "$HOME_POOL")" != "false" ]; then
+        echo "  ERROR: com.sun:auto-snapshot not set as intended on $HOME_DATASET / $HOME_POOL" >&2
+        exit 1
+    fi
+    # ... and a snapshot taken now must be visible at the dataset mountpoint
+    zfs-auto-snapshot --quiet --syslog --label=frequent --keep=4 "$HOME_DATASET"
+    if ! compgen -G '/home/.zfs/snapshot/zfs-auto-snap_frequent-*' > /dev/null; then
+        echo "  ERROR: no frequent snapshot visible under /home/.zfs/snapshot/" >&2
+        exit 1
+    fi
+    echo "  $HOME_DATASET: zfs-auto-snapshot on (frequent/hourly/daily/weekly/monthly); pools default off"
+fi
+
+# =============================================================================
 banner "GPU fault capture"
 # =============================================================================
 

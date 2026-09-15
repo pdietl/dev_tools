@@ -198,6 +198,21 @@ repo `system/hidpi-boot/` via `provision` (DMI-gated): 32 px `grub-mkfont` DejaV
 Mono + `GRUB_FONT` drop-in, and Plymouth `DeviceScale=2` baked into the
 initramfs. Both installed files self-document their revert steps.
 
+### Home-dataset ZFS snapshots (applied 2026-09-15)
+`/home` (`rpool/USERDATA/home_h04lpm`) is snapshotted by `zfs-auto-snapshot`
+every 15 minutes (keep 4), hourly (24), daily (31), weekly (8) and monthly
+(12), installed by `provision`'s "Home-dataset ZFS snapshots" section, which is
+gated on `/home` being ZFS and reads its own work back (property set on
+exactly the home dataset, a fresh snapshot visible). Both pools carry
+`com.sun:auto-snapshot=false` so root, boot and bpool are never snapshotted;
+only the home dataset opts in. Recover with
+`cp -a /home/.zfs/snapshot/<snap>/pdietl/<path> ~/<path>` — the `.zfs`
+directory sits at the dataset **mountpoint** (`/home`), not under `~`, and
+snapshot names carry UTC time. Motivation: a chained `mv … ; rm -rf …` on
+2026-09-15 destroyed the only copy of a directory's untracked history and
+there was no snapshot to restore from. Inert on the WWAN unit (LVM/ext4) and
+under WSL; applies to pdietl-home-ubun if its `/home` is ZFS.
+
 ### Chrome HEVC hardware decode
 Chrome has no software HEVC decoder, so H.265 does not play at all unless
 VA-API decode works. `provision`'s "Chrome hardware video decode" section
