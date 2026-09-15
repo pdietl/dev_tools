@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# kms-actual — what each DRM connector is really scanning out, read from the
+# kernel's atomic state in debugfs, then mutter's belief from gdctl, with
+# every disagreement flagged.
+#
+# Usage: kms-actual        (uses sudo -n for debugfs when not root)
+# Exit:  0 kernel and mutter agree; 1 a CRTC is enabled with no connector, or
+#        mutter's idea of a monitor differs from the kernel's; 2 the kernel
+#        state could not be read.
+#
+# Why this exists: mutter validates a display change with a test commit and
+# then posts the real one. When the real commit is rejected, mutter keeps
+# reporting the *requested* mode in Settings, gdctl, Xwayland and
+# monitors.xml. Only the kernel's atomic state says what the panel receives,
+# and a CRTC left enabled with no connector is the one state that makes every
+# later mode-set fail with "drmModeAtomicCommit: Invalid argument".
+
+set -euo pipefail
+
+as_root() {
+    if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo -n "$@"; fi
+}
+
+if [ "$(id -u)" -ne 0 ] && ! sudo -n true 2> /dev/null; then
+    echo "debugfs needs root: run as root or with passwordless sudo -n" >&2
+    exit 2
+fi
+
+problems=0
+declare -A kernel_hz    # connector -> integer refresh, or "off"
+
+# /sys/kernel/debug is root-only even to list, so enumerate cards from sysfs
+# and touch debugfs only through as_root.
+for card in /sys/class/drm/card*; do
+    [[ $(basename "$card") =~ ^card([0-9]+)$ ]] || continue
+    minor=${BASH_REMATCH[1]}
+    state=/sys/kernel/debug/dri/$minor/state
+    as_root test -e "$state" || continue
+    drv=$(basename "$(readlink -f "$card/device/driver")" 2> /dev/null || echo '?')
+    text=$(as_root cat "$state")
+    # One record per connector that is connected or has a CRTC, plus one
+    # S record per CRTC enabled with no connector.
+    records=$(awk -v minor="$minor" '
+        /^crtc\[/      { sec = "crtc"; name = $2 }
+        /^connector\[/ { sec = "conn"; name = $2 }
+        /^plane\[/     { sec = "plane" }
+        sec == "crtc" && /^[ \t]+enable=/         { split($0, a, "="); en[name] = a[2] }
+        sec == "crtc" && /^[ \t]+connector_mask=/ { split($0, a, "="); cm[name] = a[2] }
+        sec == "crtc" && /^[ \t]+mode: "/ {
+            split($0, q, "\""); split(q[3], f, " "); res[name] = q[2]; hz[name] = f[2]
+        }
+        sec == "conn" && /^[ \t]+crtc=/ { split($0, a, "="); crtc[name] = a[2]; order[++n] = name }
+        END {
+            for (i = 1; i <= n; i++) {
+                c = order[i]; k = crtc[c]
+                status = "unknown"
+                if ((getline s < ("/sys/class/drm/card" minor "-" c "/status")) > 0) status = s
+                if (k in res)             printf "C %s %s %s %s %s\n", c, k, res[k], hz[k], status
+                else if (status == "connected") printf "C %s off - 0 %s\n", c, status
+            }
+            for (k in en) if (en[k] == 1 && cm[k] == 0)
+                printf "S %s %s %s\n", k, res[k], hz[k]
+        }' <<< "$text")
+    [ -n "$records" ] || continue
+    echo "card$minor ($drv)"
+    while read -r kind a b c d e; do
+        case $kind in
+            C)
+                if [ "$b" = off ]; then
+                    printf '  %-8s off%25s%s\n' "$a" '' "($e)"
+                    kernel_hz[$a]=off
+                else
+                    printf '  %-8s %-7s %-10s @ %3s Hz  (%s)\n' "$a" "$b" "$c" "$d" "$e"
+                    kernel_hz[$a]=$d
+                fi
+                ;;
+            S)
+                printf '  STALE  %s enabled with no connector (%s @ %s Hz): every mode-set fails until it is disabled\n' "$a" "$b" "$c"
+                problems=$((problems + 1))
+                ;;
+        esac
+    done <<< "$records"
+done
+
+if ! command -v gdctl > /dev/null || [ -z "${DBUS_SESSION_BUS_ADDRESS:-}${WAYLAND_DISPLAY:-}" ]; then
+    echo "(no gdctl or no GNOME session here; mutter comparison skipped)"
+elif belief=$(gdctl show 2> /dev/null); then
+    echo "mutter"
+    # "Monitor DP-7 (...)" then, if enabled, "Current mode" followed by WxH@rate.
+    while read -r conn rate; do
+        actual=${kernel_hz[$conn]:-absent}
+        if [ "$rate" = off ]; then
+            if [ "$actual" = off ] || [ "$actual" = absent ]; then
+                printf '  %-8s off\n' "$conn"
+            else
+                printf '  %-8s off        MISMATCH: kernel drives it at %s Hz\n' "$conn" "$actual"
+                problems=$((problems + 1))
+            fi
+        else
+            want=$(printf '%.0f' "$rate")
+            if [ "$actual" = "$want" ]; then
+                printf '  %-8s %s Hz\n' "$conn" "$want"
+            else
+                printf '  %-8s %s Hz     MISMATCH: kernel says %s\n' "$conn" "$want" "$actual"
+                problems=$((problems + 1))
+            fi
+        fi
+    done < <(awk '
+        match($0, /Monitor [^ ]+/) {
+            if (cur != "") print cur, (seen ? rate : "off")
+            cur = substr($0, RSTART + 8, RLENGTH - 8); seen = 0; rate = ""; want = 0
+        }
+        /Current mode/ { want = 1 }
+        want && match($0, /[0-9]+x[0-9]+@[0-9.]+/) {
+            rate = substr($0, RSTART, RLENGTH); sub(/.*@/, "", rate); seen = 1; want = 0
+        }
+        END { if (cur != "") print cur, (seen ? rate : "off") }' <<< "$belief")
+else
+    echo "(gdctl show failed; mutter comparison skipped)"
+fi
+
+if [ "$problems" -gt 0 ]; then
+    echo "$problems problem(s): the kernel state above is the truth" >&2
+    exit 1
+fi
+echo "kernel and mutter agree"

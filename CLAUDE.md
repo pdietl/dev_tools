@@ -34,7 +34,9 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   `sysmon.sh` (system + GPU monitor, screen + file logging; period from
   `SYSMON_INTERVAL`, default 1 s, and it appends rather than truncating so a
   restarted run adds to the record). Run continuously at 10 s by the
-  `sysmon.service` user unit — see "GPU fault capture".
+  `sysmon.service` user unit — see "GPU fault capture". `kms-actual` prints
+  what the kernel really scans out per connector and flags where mutter
+  disagrees; run it before believing Settings after any display change.
 - **`system/`** — everything `provision` installs outside `$HOME`:
   - **`system/udev_rules/`** — SWD/JTAG programmer rules (ST-Link, CMSIS-DAP,
     picoprobe, WCH-Link, xgecu) plus two rules hiding volumes from GNOME's
@@ -85,11 +87,13 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
     `GDFUSE_MOUNT_NAME`; the home-directory list and this exclusion both derive
     from it, and `provision` refuses to install a mount unit whose `ExecStart`
     names a different directory, so the two cannot drift apart unnoticed.
-- **`machine-notes/`** — machine-fix notes, one markdown file per machine:
-  `thinkpad-p16-gen3-ubuntu-suspend.md`, `thinkpad-t16-gen4-ubuntu-suspend.md`.
-  Follow that model for new machines. Notes hold **current state only**; the
-  investigation narrative — including approaches later refuted — lives in a
-  sibling `*-chronology.md`, which is provenance, not required reading.
+- **`machine-notes/`** — machine-fix notes, one markdown file per machine and
+  topic: `thinkpad-p16-gen3-ubuntu-suspend.md`,
+  `thinkpad-p16-gen3-ubuntu-external-displays.md`,
+  `thinkpad-t16-gen4-ubuntu-suspend.md`. Follow that model for new machines.
+  Notes hold **current state only**; the investigation narrative — including
+  approaches later refuted — lives in a sibling `*-chronology.md`, which is
+  provenance, not required reading.
 
 ## Conventions
 
@@ -141,6 +145,16 @@ the reason. Two services capture the rest (`system/gpu-capture/`, installed by
 refusal into `/var/log/nvkms-refusals.log`, and the `sysmon.service` user unit
 logs 10 s telemetry to `~/.local/state/sysmon/`. Both are size-capped by
 logrotate.
+
+### External displays over USB-C / MST → `machine-notes/thinkpad-p16-gen3-ubuntu-external-displays.md`
+How DP Alt Mode lane count follows the monitor's USB-C data setting (and
+how to read it from USB enumeration), the BenQ RD280UG daisy chain (MST is
+off by default and off means mirror), the NVIDIA MST/DSC slot budget that
+allows 120 + 100 Hz but not 120 + 120, and two traps: mutter reports the
+mode it asked for even when the driver rejected it, and a closed-lid unlock
+can leave `eDP-1` lit so every later mode-set fails. `kms-actual` is the
+read-back for both. **Read it before touching refresh rates or believing
+Settings > Displays.**
 
 ### Crash capture (applied 2026-07-25)
 Two hard hangs in two days (2026-07-24 reboot teardown, 2026-07-25 idle),
