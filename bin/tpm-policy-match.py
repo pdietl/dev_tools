@@ -16,6 +16,8 @@ Needs tcglog.py next to it.
 """
 import base64, hashlib, importlib.util, itertools, json, os, struct, sys, uuid
 
+sys.dont_write_bytecode = True  # tcglog.py is loaded from beside this file; keep ~/bin free of caches
+
 H = lambda *a: hashlib.sha256(b"".join(a)).digest()
 
 def load_tcglog():
