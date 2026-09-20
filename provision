@@ -661,7 +661,7 @@ else
     else
         echo "  kitty: installing..."
         sudo -u "$SUDO_USER" -- curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh |
-            sudo -u "$SUDO_USER" -- sh /dev/stdin launch=n
+            sudo -u "$SUDO_USER" -- sh -s -- launch=n
     fi
     # Exactly one kitty on PATH. The terminfo package stays: it is what lets a
     # kitty on another machine ssh in here without `kitten ssh`.
