@@ -20,15 +20,24 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   every run, so editing a file here and re-running deploys it. Files a machine
   writes for itself seed once and are then left alone: `~/.gitconfig`
   (generated, not copied, and may collect per-machine sections), `starship.toml`
-  (installed inside the first-run-only bashrc block), and nvim's `lazyvim.json`
-  and `lazy-lock.json` (owned by `:LazyExtras` and `:Lazy`). Tool installs stay
+  (installed inside the first-run-only bashrc block), nvim's `lazyvim.json`
+  and `lazy-lock.json` (owned by `:LazyExtras` and `:Lazy`), and kitty's
+  `current-theme.conf` (owned by `kitten themes`). Tool installs stay
   guarded on the tool being absent.
 - **`dotfiles/`** — everything `provision` copies into the invoking user's
   `$HOME`: `vimrc`, `nvim/` (LazyVim), `tmux.conf`, `starship.toml`, `gdbinit`,
   `nix.conf`, `gitignore_global`, `cscope_maps.vim`, `dedup_paths.sh`
-  (PATH-dedup helper), and two user units: `google-drive-ocamlfuse.service`
+  (PATH-dedup helper), `kitty/` (see below), and two user units: `google-drive-ocamlfuse.service`
   (auto-mount, see below) and `sysmon.service` (continuous telemetry, see "GPU
   fault capture"). The repo's own `.editorconfig` stays at the top level.
+  kitty is upstream's build, not apt's: `provision` runs kitty's installer
+  into `~/.local/kitty.app`, removes the apt `kitty` (keeping
+  `kitty-terminfo`), and then parses the installed `kitty.conf` with the
+  installed binary, failing on any rejected line, since the config is written
+  against upstream's option set. `kitten themes` comments out every
+  color-valued option it finds in `kitty.conf`, so those live in
+  `kitty/theme-overrides.conf`, included after the theme. `bin/do_update`
+  re-runs the installer, which is how kitty updates.
 - **`bin/`** — user scripts copied to `~/bin` (on `$PATH`): `netinfo`,
   `do_cscope`, `do_update`, `ntfy`, `wsl_usb_attach`/`detach`, `reset`,
   `sysmon.sh` (system + GPU monitor, screen + file logging; period from

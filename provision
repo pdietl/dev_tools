@@ -648,6 +648,77 @@ else
     _chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.fonts
 fi
 
+# kitty comes from upstream's installer rather than apt: the archive trails
+# upstream by several releases, and kitty.conf is written against upstream's
+# option set. The installer only ever touches ~/.local/kitty.app; re-running it
+# is how kitty updates (bin/do_update does).
+if in_wsl; then
+    echo "  kitty: skipped (WSL)"
+else
+    kitty_app="$USER_HOME/.local/kitty.app"
+    if [ -x "$kitty_app/bin/kitty" ]; then
+        echo "  kitty: already installed"
+    else
+        echo "  kitty: installing..."
+        sudo -u "$SUDO_USER" -- curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh |
+            sudo -u "$SUDO_USER" -- sh /dev/stdin launch=n
+    fi
+    # Exactly one kitty on PATH. The terminfo package stays: it is what lets a
+    # kitty on another machine ssh in here without `kitten ssh`.
+    if pkg_installed kitty; then
+        echo "  kitty: removing the apt build"
+        _apt_get install -y kitty-terminfo
+        apt-mark manual kitty-terminfo > /dev/null
+        _apt_get remove -y kitty
+    fi
+    sudo -u "$SUDO_USER" ln -sf "$kitty_app/bin/kitty" "$kitty_app/bin/kitten" "$USER_HOME/.local/bin/"
+
+    # Upstream's desktop entry names a bare `kitty` and a themed icon, neither
+    # of which resolves for an install outside the system prefixes. Re-derived
+    # on every run so it follows whatever the installed release ships.
+    kitty_desktop="$USER_HOME/.local/share/applications/kitty.desktop"
+    installUser "$USER_HOME"/.local/share/applications "$kitty_app/share/applications/kitty.desktop"
+    sed -i \
+        -e "s|Icon=kitty|Icon=$kitty_app/share/icons/hicolor/256x256/apps/kitty.png|" \
+        -e "s|Exec=kitty|Exec=$kitty_app/bin/kitty|" \
+        "$kitty_desktop"
+    if ! grep -q "^Exec=$kitty_app/bin/kitty" "$kitty_desktop" ||
+        ! grep -q "^TryExec=$kitty_app/bin/kitty" "$kitty_desktop"; then
+        echo "  kitty: upstream's desktop entry no longer matches the Exec= rewrite"
+        exit 1
+    fi
+    sudo -u "$SUDO_USER" -- update-desktop-database "$USER_HOME"/.local/share/applications
+
+    echo "  kitty: installing config"
+    installUser "$USER_HOME"/.config/kitty "$SCRIPT_DIR"/dotfiles/kitty/kitty.conf
+    installUser "$USER_HOME"/.config/kitty "$SCRIPT_DIR"/dotfiles/kitty/theme-overrides.conf
+    # `kitten themes` owns this file once it exists.
+    if [ ! -e "$USER_HOME"/.config/kitty/current-theme.conf ]; then
+        installUser "$USER_HOME"/.config/kitty "$SCRIPT_DIR"/dotfiles/kitty/current-theme.conf
+    fi
+
+    # Parse the installed config with the installed kitty. A bad value lands
+    # in bad_lines; an unknown option is only ever a line on stderr.
+    kitty_check=$(sudo -u "$SUDO_USER" -- "$kitty_app/bin/kitty" +runpy '
+import sys
+from kitty.config import load_config
+bad = []
+load_config(sys.argv[-1], accumulate_bad_lines=bad)
+for b in bad:
+    print(f"bad value, line {b.number}: {b.line.strip()} ({b.exception})", file=sys.stderr)
+' "$USER_HOME"/.config/kitty/kitty.conf 2>&1) || {
+        echo "  kitty: config check could not run:"
+        echo "$kitty_check"
+        exit 1
+    }
+    if [ -n "$kitty_check" ]; then
+        echo "  kitty: $("$kitty_app/bin/kitty" --version) rejects part of kitty.conf:"
+        echo "$kitty_check"
+        exit 1
+    fi
+    echo "  kitty: $("$kitty_app/bin/kitty" --version | cut -d' ' -f1,2), config parses clean"
+fi
+
 # =============================================================================
 banner "Setting up Docker"
 # =============================================================================

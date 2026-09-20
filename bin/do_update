@@ -6,4 +6,10 @@ sudo apt-get update
 sudo apt-get upgrade -y
 sudo apt-get install -y $(apt-show-versions -u | sed -E 's/^([^\/]+)\/.*$/\1/' | tr '\n' ' ')
 sudo snap refresh
+
+# kitty is upstream's build, outside apt; its installer is also its updater.
+if [ -x "$HOME/.local/kitty.app/bin/kitty" ]; then
+    curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
+fi
+
 sudo apt-get autoremove -y
