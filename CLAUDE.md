@@ -23,7 +23,8 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   (installed inside the first-run-only bashrc block), nvim's `lazyvim.json`
   and `lazy-lock.json` (owned by `:LazyExtras` and `:Lazy`), and kitty's
   `current-theme.conf` (owned by `kitten themes`). Tool installs stay
-  guarded on the tool being absent. A leaf tool installed from upstream
+  guarded on the tool being absent, so nothing here updates them, `bin/do_update`
+  included: it covers apt and snap only. A leaf tool installed from upstream
   (starship, awscli, neovim, nix, kitty, google-drive-ocamlfuse) also has its
   apt packages blocked by `apt_block`, which writes a negative pin to
   `/etc/apt/preferences.d/upstream-<tool>` and reads it back through
@@ -37,14 +38,27 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   (PATH-dedup helper), `kitty/` (see below), and two user units: `google-drive-ocamlfuse.service`
   (auto-mount, see below) and `sysmon.service` (continuous telemetry, see "GPU
   fault capture"). The repo's own `.editorconfig` stays at the top level.
-  kitty is upstream's build, not apt's: `provision` runs kitty's installer
-  into `~/.local/kitty.app`, removes the apt `kitty` (keeping
-  `kitty-terminfo`), and then parses the installed `kitty.conf` with the
-  installed binary, failing on any rejected line, since the config is written
-  against upstream's option set. `kitten themes` comments out every
+  kitty is upstream's build, not apt's, installed system-wide: `provision`
+  runs kitty's installer into `/usr/local/kitty.app`, publishes `kitty`,
+  `kitten`, the desktop entry and the icons as symlinks into `/usr/local`,
+  removes the apt `kitty` and `kitty-terminfo`, and drops any per-user copy
+  under `~/.local`, which would win on `PATH`. It also rebuilds
+  `/usr/local/share/icons/hicolor/icon-theme.cache` when one exists (Chrome's
+  package script leaves one): GTK trusts that cache while it is no older than
+  the theme's top-level directory, so an icon added beneath it stays invisible
+  and the launcher shows a generic gear. The bundle also supplies the
+  system's `xterm-kitty` terminfo entry, linked at
+  `/etc/terminfo/x/xterm-kitty` and read back through `infocmp`: kitty gives
+  `TERMINFO` only to its own children, so an ssh login from a kitty elsewhere
+  needs the entry on ncurses' system path, which never includes `/usr/local`.
+  WSL runs no kitty and takes apt's `kitty-terminfo` instead. `provision` then
+  parses the installed `kitty.conf` with the installed binary, failing on any
+  rejected line, since the config is written against upstream's option set.
+  Only that config is per-user. `kitten themes` comments out every
   color-valued option it finds in `kitty.conf`, so those live in
-  `kitty/theme-overrides.conf`, included after the theme. `bin/do_update`
-  re-runs the installer, which is how kitty updates.
+  `kitty/theme-overrides.conf`, included after the theme. kitty updates by
+  re-running its installer with `dest=/usr/local`; the symlinks and the
+  terminfo link follow the new bundle without a `provision` run.
 - **`bin/`** — user scripts copied to `~/bin` (on `$PATH`): `netinfo`,
   `do_cscope`, `do_update`, `ntfy`, `wsl_usb_attach`/`detach`, `reset`,
   `sysmon.sh` (system + GPU monitor, screen + file logging; period from

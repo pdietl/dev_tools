@@ -686,46 +686,90 @@ else
     _chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.fonts
 fi
 
-# kitty comes from upstream's installer rather than apt: the archive trails
-# upstream by several releases, and kitty.conf is written against upstream's
-# option set. The installer only ever touches ~/.local/kitty.app; re-running it
-# is how kitty updates (bin/do_update does).
+# kitty is upstream's build, not apt's: the archive trails upstream, and
+# kitty.conf is written against upstream's option set. Under /usr/local the
+# same bundle also supplies the system's xterm-kitty terminfo entry. The
+# installer touches only $KITTY_APP, and re-running it is how kitty updates.
+declare -r KITTY_PREFIX=/usr/local
+declare -r KITTY_APP=$KITTY_PREFIX/kitty.app
+declare -r KITTY_TERMINFO=/etc/terminfo/x/xterm-kitty
 if in_wsl; then
-    echo "  kitty: skipped (WSL)"
+    # No kitty runs here, but one elsewhere may ssh in, and without the bundle
+    # apt's entry is the only source.
+    echo "  kitty: skipped (WSL); terminfo entry from apt"
+    _apt_get install -y kitty-terminfo
 else
-    kitty_app="$USER_HOME/.local/kitty.app"
-    if [ -x "$kitty_app/bin/kitty" ]; then
+    if [ -x "$KITTY_APP/bin/kitty" ]; then
         echo "  kitty: already installed"
     else
         echo "  kitty: installing..."
-        sudo -u "$SUDO_USER" -- curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh |
-            sudo -u "$SUDO_USER" -- sh -s -- launch=n
+        curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh |
+            sh -s -- dest="$KITTY_PREFIX" launch=n
     fi
-    # Exactly one kitty on PATH. The terminfo package stays: it is what lets a
-    # kitty on another machine ssh in here without `kitten ssh`.
-    if pkg_installed kitty; then
-        echo "  kitty: removing the apt build"
-        _apt_get install -y kitty-terminfo
-        apt-mark manual kitty-terminfo > /dev/null
-        _apt_get remove -y kitty
-    fi
-    sudo -u "$SUDO_USER" ln -sf "$kitty_app/bin/kitty" "$kitty_app/bin/kitten" "$USER_HOME/.local/bin/"
+    # Exactly one kitty and one xterm-kitty entry: apt's would be a second
+    # source of each.
+    for pkg in kitty kitty-terminfo; do
+        if pkg_installed "$pkg"; then
+            echo "  kitty: removing apt's $pkg"
+            _apt_get remove -y "$pkg"
+        fi
+    done
+    apt_block kitty kitty kitty-terminfo
 
-    # Upstream's desktop entry names a bare `kitty` and a themed icon, neither
-    # of which resolves for an install outside the system prefixes. Re-derived
-    # on every run so it follows whatever the installed release ships.
-    kitty_desktop="$USER_HOME/.local/share/applications/kitty.desktop"
-    installUser "$USER_HOME"/.local/share/applications "$kitty_app/share/applications/kitty.desktop"
-    sed -i \
-        -e "s|Icon=kitty|Icon=$kitty_app/share/icons/hicolor/256x256/apps/kitty.png|" \
-        -e "s|Exec=kitty|Exec=$kitty_app/bin/kitty|" \
-        "$kitty_desktop"
-    if ! grep -q "^Exec=$kitty_app/bin/kitty" "$kitty_desktop" ||
-        ! grep -q "^TryExec=$kitty_app/bin/kitty" "$kitty_desktop"; then
-        echo "  kitty: upstream's desktop entry no longer matches the Exec= rewrite"
+    # The bundle is laid out as a prefix; each published file is a symlink into
+    # it, so an update needs no republishing. A list rather than stow, which
+    # would also publish kitty-open.desktop and its claim on text and image
+    # MIME types.
+    declare -ra KITTY_PUBLISHED=(
+        bin/kitty
+        bin/kitten
+        share/applications/kitty.desktop
+        share/icons/hicolor/256x256/apps/kitty.png
+        share/icons/hicolor/scalable/apps/kitty.svg
+    )
+    for f in "${KITTY_PUBLISHED[@]}"; do
+        if [ ! -e "$KITTY_APP/$f" ]; then
+            echo "  kitty: the bundle no longer ships $f" >&2
+            exit 1
+        fi
+        _mkdir -p "$KITTY_PREFIX/${f%/*}"
+        ln -sfn "$KITTY_APP/$f" "$KITTY_PREFIX/$f"
+    done
+
+    # GTK trusts a theme's icon-theme.cache for as long as it is no older than
+    # the theme's top-level directory, which an icon added two levels down
+    # leaves untouched, so an existing cache hides the new icon until rebuilt.
+    # With no cache GTK scans the directories, so none is created here.
+    kitty_hicolor=$KITTY_PREFIX/share/icons/hicolor
+    if [ -e "$kitty_hicolor/icon-theme.cache" ]; then
+        # -t: this hicolor has no index.theme of its own.
+        gtk-update-icon-cache -q -f -t "$kitty_hicolor"
+        if ! grep -qa kitty "$kitty_hicolor/icon-theme.cache"; then
+            echo "  kitty: $kitty_hicolor/icon-theme.cache does not list the icon" >&2
+            exit 1
+        fi
+        echo "  kitty: icon cache rebuilt"
+    fi
+
+    # kitty hands its own children TERMINFO. Every other login (ssh from a
+    # kitty elsewhere, sudo, root) resolves xterm-kitty through ncurses' system
+    # path, which has /etc/terminfo for local entries and nothing in /usr/local.
+    _mkdir -p "${KITTY_TERMINFO%/*}"
+    ln -sfn "$KITTY_APP/share/terminfo/x/xterm-kitty" "$KITTY_TERMINFO"
+    # Read back through ncurses, not the link: the first line of the dump names
+    # the file the lookup landed on.
+    terminfo_src=$(env -u TERMINFO -u TERMINFO_DIRS infocmp -x xterm-kitty 2>&1) || {
+        echo "  kitty: xterm-kitty does not resolve:" >&2
+        echo "$terminfo_src" >&2
+        exit 1
+    }
+    terminfo_src=${terminfo_src%%$'\n'*}
+    if [[ $terminfo_src != *": $KITTY_TERMINFO" ]]; then
+        echo "  kitty: xterm-kitty resolves somewhere other than $KITTY_TERMINFO:" >&2
+        echo "  $terminfo_src" >&2
         exit 1
     fi
-    sudo -u "$SUDO_USER" -- update-desktop-database "$USER_HOME"/.local/share/applications
+    echo "  kitty: xterm-kitty resolves to $KITTY_TERMINFO"
 
     echo "  kitty: installing config"
     installUser "$USER_HOME"/.config/kitty "$SCRIPT_DIR"/dotfiles/kitty/kitty.conf
@@ -737,7 +781,7 @@ else
 
     # Parse the installed config with the installed kitty. A bad value lands
     # in bad_lines; an unknown option is only ever a line on stderr.
-    kitty_check=$(sudo -u "$SUDO_USER" -- "$kitty_app/bin/kitty" +runpy '
+    kitty_check=$(sudo -u "$SUDO_USER" -- "$KITTY_APP/bin/kitty" +runpy '
 import sys
 from kitty.config import load_config
 bad = []
@@ -750,11 +794,31 @@ for b in bad:
         exit 1
     }
     if [ -n "$kitty_check" ]; then
-        echo "  kitty: $("$kitty_app/bin/kitty" --version) rejects part of kitty.conf:"
+        echo "  kitty: $("$KITTY_APP/bin/kitty" --version) rejects part of kitty.conf:"
         echo "$kitty_check"
         exit 1
     fi
-    echo "  kitty: $("$kitty_app/bin/kitty" --version | cut -d' ' -f1,2), config parses clean"
+    echo "  kitty: $("$KITTY_APP/bin/kitty" --version | cut -d' ' -f1,2), config parses clean"
+
+    # Exactly one kitty for this user too: a copy under ~/.local wins on PATH
+    # (~/.local/bin precedes /usr/local/bin) and in the application menu. Last,
+    # so it goes only once the install replacing it has run as this user.
+    user_app=$USER_HOME/.local/kitty.app
+    for link in "$USER_HOME"/.local/bin/kitty "$USER_HOME"/.local/bin/kitten; do
+        if [ -L "$link" ] && [[ $(readlink "$link") == "$user_app"/* ]]; then
+            rm -f "$link"
+            echo "  kitty: removed $link"
+        fi
+    done
+    user_desktop=$USER_HOME/.local/share/applications/kitty.desktop
+    if [ -f "$user_desktop" ] && grep -qF "$user_app/" "$user_desktop"; then
+        rm -f "$user_desktop"
+        echo "  kitty: removed $user_desktop"
+    fi
+    if [ -d "$user_app" ]; then
+        rm -rf "$user_app"
+        echo "  kitty: removed $user_app; restart any kitty still running from it"
+    fi
 fi
 
 # =============================================================================
