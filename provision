@@ -66,6 +66,40 @@ pkg_installed() {
     dpkg-query -Wf'${db:Status-Status}' "$1" 2> /dev/null | grep -qx installed
 }
 
+# Leaves the named apt packages with no install candidate, for a tool this
+# script installs from upstream instead: an apt copy beside the upstream one
+# shadows it, or is shadowed by it, on PATH, and neither says so.
+apt_block() {
+    local tool=$1
+    shift
+    local pref=/etc/apt/preferences.d/upstream-$tool
+    local pkg candidate
+    for pkg in "$@"; do
+        if pkg_installed "$pkg"; then
+            echo "  apt block ($tool): $pkg is installed from apt; remove it first" >&2
+            exit 1
+        fi
+    done
+    cat > "$pref" << EOF
+Explanation: Written by dev_tools provision, which installs $tool from
+Explanation: upstream; a negative priority leaves apt no candidate for a
+Explanation: second copy. Revert: delete this file.
+Package: $*
+Pin: release *
+Pin-Priority: -1
+EOF
+    # Read back through apt rather than trusting the file to have parsed. No
+    # output at all means apt has no such package, so nothing to block.
+    for pkg in "$@"; do
+        candidate=$(apt-cache policy "$pkg" | awk '/Candidate:/ {print $2}')
+        if [ -n "$candidate" ] && [ "$candidate" != "(none)" ]; then
+            echo "  apt block ($tool): $pkg still has candidate $candidate despite $pref" >&2
+            exit 1
+        fi
+    done
+    echo "  apt block ($tool): $*"
+}
+
 banner() {
     echo
     echo "==== $* ===="
@@ -355,6 +389,7 @@ else
     echo "  Starship: installing..."
     sh <(curl -sS https://starship.rs/install.sh) -y
 fi
+apt_block starship starship
 
 if in_wsl; then
     echo "  Google Chrome: skipped (WSL)"
@@ -504,6 +539,7 @@ else
     popd > /dev/null
     rm -rf "$tmp"
 fi
+apt_block awscli awscli
 
 if [ -e "$USER_HOME/.nvm_installed" ]; then
     echo "  NVM + node: already installed"
@@ -528,6 +564,7 @@ else
     tar -C /usr/local --strip-components 1 -xzf /tmp/nvim.tgz
     rm /tmp/nvim.tgz
 fi
+apt_block neovim neovim
 
 # Refreshed on every run, independently of the binary: nvim being on PATH says
 # nothing about whether ~/.config/nvim still matches this tree.
@@ -626,6 +663,7 @@ else
     echo "trusted-users = $SUDO_USER" >> /etc/nix/nix.conf
     touch /etc/.nix-installed
 fi
+apt_block nix nix-bin nix-setup-systemd
 # Converge the user-level nix.conf on every run so settings updates deploy.
 installUser "$USER_HOME/.config/nix" "$SCRIPT_DIR/dotfiles/nix.conf"
 
@@ -932,6 +970,7 @@ fi
 if ls /etc/apt/sources.list.d/*alessandro-strada* > /dev/null 2>&1; then
     add-apt-repository --remove --no-update -y ppa:alessandro-strada/ppa > /dev/null 2>&1
 fi
+apt_block google-drive-ocamlfuse google-drive-ocamlfuse
 
 # Warms the mount so the first process to list $HOME does not wait on a cold
 # getattr; the unit's ExecStartPost runs it detached. Installed before the

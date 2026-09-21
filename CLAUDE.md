@@ -23,7 +23,14 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   (installed inside the first-run-only bashrc block), nvim's `lazyvim.json`
   and `lazy-lock.json` (owned by `:LazyExtras` and `:Lazy`), and kitty's
   `current-theme.conf` (owned by `kitten themes`). Tool installs stay
-  guarded on the tool being absent.
+  guarded on the tool being absent. A leaf tool installed from upstream
+  (starship, awscli, neovim, nix, kitty, google-drive-ocamlfuse) also has its
+  apt packages blocked by `apt_block`, which writes a negative pin to
+  `/etc/apt/preferences.d/upstream-<tool>` and reads it back through
+  `apt-cache policy`; it refuses while an apt copy is still installed. The
+  upstream toolchains (Go, Rust, Node) are deliberately not blocked: other apt
+  packages depend on `golang-go`, `rustc` and `nodejs`, and a pin would make
+  every one of those uninstallable.
 - **`dotfiles/`** — everything `provision` copies into the invoking user's
   `$HOME`: `vimrc`, `nvim/` (LazyVim), `tmux.conf`, `starship.toml`, `gdbinit`,
   `nix.conf`, `gitignore_global`, `cscope_maps.vim`, `dedup_paths.sh`
