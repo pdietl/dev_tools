@@ -267,6 +267,7 @@ declare -a packages=(
     libfontconfig-dev
     libfreetype-dev
     libfuse3-dev
+    libgbm-dev
     libgit2-dev
     libgl1-mesa-dev
     libglm-dev
@@ -1439,6 +1440,21 @@ else
     if [ -z "$nvidia_render_node" ]; then
         echo "  NVKMS refusal snapshots: skipped (no NVIDIA render node)"
     else
+        # Built here rather than shipped as a binary: one translation unit
+        # against the system libgbm, so it always matches the installed Mesa.
+        # The snapshot reports scanout capacity only where this exists, so a
+        # failed build degrades that instrument instead of failing the run.
+        probe_src=$SCRIPT_DIR/system/gpu-capture/gbm-scanout-probe.c
+        gbm_flags=()
+        read -r -a gbm_flags < <(pkg-config --cflags --libs gbm) || true
+        if [ ${#gbm_flags[@]} -gt 0 ] && cc -O2 -Wall \
+            -o /usr/local/bin/gbm-scanout-probe "$probe_src" "${gbm_flags[@]}"
+        then
+            echo "  scanout probe: -> /usr/local/bin/gbm-scanout-probe"
+        else
+            echo "  scanout probe: build failed; capacity goes unrecorded" >&2
+        fi
+
         echo "  NVKMS refusal snapshots: -> /var/log/nvkms-refusals.log"
         _install -m 0755 "$SCRIPT_DIR"/system/gpu-capture/nvkms-refusal-snapshot \
             /usr/local/sbin/nvkms-refusal-snapshot
