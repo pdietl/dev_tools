@@ -95,9 +95,13 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   - **`system/gpu-capture/`** — instrumentation for the dGPU scanout-allocation
     refusal: `nvkms-refusal-snapshot` (+ its unit) captures GPU state at the
     moment of a refusal, since the driver reports every cause identically, and
-    logrotate configs cap both that log and `sysmon`'s. Gated on an NVIDIA
-    render node, so inert elsewhere. The `sysmon.service` user unit that pairs
-    with it lives in `dotfiles/` with the other things installed into `$HOME`.
+    `gbm-scanout-probe.c` (built to `/usr/local/bin`) measures the quantity
+    that actually predicts one — how many buffers of a head's own mode the
+    card will still hand a fresh client, which free memory does not tell you.
+    The snapshot records it per head and it is usable by hand. Logrotate
+    configs cap that log and `sysmon`'s. Gated on an NVIDIA render node, so
+    inert elsewhere. The `sysmon.service` user unit that pairs with it lives
+    in `dotfiles/` with the other things installed into `$HOME`.
   - **`system/suspend/`** — suspend/resume mitigations: `gdfuse-suspend-guard`
     (every non-WSL machine) plus per-model sets gated on
     `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
@@ -169,17 +173,23 @@ The repo `system/suspend/p16-gen3/` set was applied to this install 2026-07-18
 T16 era (applied 2026-07-12).
 
 ### dGPU scanout-allocation refusal (instrumented 2026-08-08)
-Panel static plus an unusable-laggy desktop, triggered by **display
+Panel static plus an unusable-laggy desktop, or in its severe form console
+text with a live cursor and no desktop at all, triggered by **display
 reconfiguration** (lid open/close, hotplug, undock) rather than suspend — so
 none of the four suspend modes apply and chasing them wastes time. Same doc,
-section "Display glitch / laggy desktop". Why the dGPU refuses the allocation
-is still open; `/etc/modprobe.d/nvidia-modeset-debug.conf` (`nvidia_modeset
-debug=1`, hand-applied, **not** installed by `provision`) is armed to capture
-the reason. Two services capture the rest (`system/gpu-capture/`, installed by
-`provision`): `nvkms-refusal-snapshot.service` snapshots GPU state at each
-refusal into `/var/log/nvkms-refusals.log`, and the `sysmon.service` user unit
-logs 10 s telemetry to `~/.local/state/sysmon/`. Both are size-capped by
-logrotate.
+section "Display glitch / laggy desktop", which also holds the recovery
+procedure. The refusal is a **large contiguous** allocation failing
+(3840x2400x4 = 35.2 MiB in one piece); `nvidia-smi` free memory reads healthy
+throughout and does not predict it, so never conclude from it. Measure with
+`gbm-scanout-probe` instead. Three instruments (`system/gpu-capture/`,
+installed by `provision`): `gbm-scanout-probe` reports how many panel-sized
+scanout buffers a fresh client can get, `nvkms-refusal-snapshot.service`
+snapshots GPU state plus that capacity at each refusal into
+`/var/log/nvkms-refusals.log`, and the `sysmon.service` user unit logs 10 s
+telemetry to `~/.local/state/sysmon/`. The logs are size-capped by logrotate.
+`/etc/modprobe.d/nvidia-modeset-debug.conf` (`nvidia_modeset debug=1`,
+hand-applied, **not** installed by `provision`) stays armed for the modeset
+reason lines.
 
 ### External displays over USB-C / MST → `machine-notes/thinkpad-p16-gen3-ubuntu-external-displays.md`
 How DP Alt Mode lane count follows the monitor's USB-C data setting (and

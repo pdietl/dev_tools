@@ -148,3 +148,35 @@ never as a source of facts to act on.
   subdirectory grepped for, a startup marker reused across a changed output
   mode), which is also why the gdfuse operation log was added: without a
   record of what the daemon was asked for, attribution was guesswork.
+- **2026-09-21** — first severe-form occurrence of the scanout refusal: a
+  6 h s2idle resume on lid open left the console text on the panel with a
+  live, tracking mouse cursor and no desktop, and it did not clear. Resolved
+  the standing "why is it refused" question, and demoted the
+  display-bandwidth (IMP) candidate that had led it — the episode had a
+  single head attached at a mode that had been driving it minutes earlier.
+  Two wrong readings on the way, both quantified and both plausible. First,
+  free video memory correlated beautifully: the only three hours in 46 h of
+  `sysmon` telemetry with refusals were the only three with free VRAM under
+  750 MiB, which reads as exhaustion until you notice a framebuffer is 35 MiB
+  and 781 MiB was free. Second, a purpose-written GBM probe reported the
+  largest obtainable contiguous allocation as a stable 31 MiB across five
+  runs — an artifact of the probe's own bisection, whose upper bound was
+  8192 px of width at the 1024-line test height, i.e. exactly 32 MiB. Testing
+  above that bound allocated 36 MiB fine. The measurement that held up was a
+  count rather than a size: how many panel-sized (3840x2400) scanout buffers
+  a fresh client can obtain, which was 0–2 while the desktop was down and 64
+  after. Staged freeing then separated the variables — releasing 239 MiB
+  moved capacity not at all, a further 468 MiB took it from 2 to 19 — so it
+  is which blocks are released, not how many bytes. The cause surfaced only
+  after recovery: `gnome-shell` (same pid, never restarted) dropped from
+  4482 MiB to 587 MiB across the reactivation, and had still been holding all
+  of it while the session sat inactive, which is what makes the severe form
+  self-sustaining. Also noted, because it undercounts every previous
+  estimate: this episode logged 451 `gbm_surface_lock_front_buffer` failures
+  and zero `Failed to allocate NVKMS memory` lines, while the same day's mild
+  episode logged 3849 of the latter. The demoted IMP candidate, kept here in
+  case it is ever worth re-testing: the modeset driver carries an "Is Mode
+  Possible" display-bandwidth subsystem whose failure strings include
+  `Failed to allocate %u KBPS Iso and %u KBPS Dram` and `Unexpectedly failed
+  to program post-modeset bandwidth!`, neither of which has been observed on
+  this machine.

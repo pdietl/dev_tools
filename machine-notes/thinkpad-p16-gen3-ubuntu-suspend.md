@@ -902,12 +902,21 @@ stops.
 ## Display glitch / laggy desktop: NVKMS refuses scanout allocations
 
 A fourth lifecycle event in the dGPU display path, and the first one that
-leaves a usable log trail. Unlike the three above it is not fatal — it
-clears on its own — but it is disruptive while it lasts.
+leaves a usable log trail. It has a mild form and a severe one; they are the
+same shortage at different depths.
 
-**Symptom (first seen 2026-07-29, again 2026-08-08):** static and glitching
-over an otherwise working desktop or login screen, and with the lid closed
-input lags badly enough to be unusable. Opening the lid clears it.
+**Mild form:** static and glitching over an otherwise working desktop or
+login screen, and with the lid closed input lags badly enough to be
+unusable. Enough allocations still succeed that frames reach the panel
+intermittently, and a display reconfiguration — opening the lid — usually
+clears it.
+
+**Severe form:** after a resume the panel keeps whatever the console last
+wrote, a mouse cursor appears and tracks the touchpad normally, and no
+desktop ever arrives. The cursor is the tell: it has its own KMS plane and
+needs a buffer of a few hundred KiB, which still allocates, while the primary
+plane needs a full-panel framebuffer, which does not. This form does not
+clear on its own — see Recovery below.
 
 **What is happening.** The dGPU refuses scanout-type memory allocations:
 
@@ -945,14 +954,75 @@ display' has no configuration which is-current!`, plus
 When it fires the freezer, i915 PHY and igc paths are all clean: this is
 **not** one of the four failure modes above, and chasing those wastes time.
 
-**Why it is refused is not established.** Free framebuffer was ample, system
-memory was not under pressure, and no Xid was raised. The modeset driver
-carries an IMP ("Is Mode Possible") display-bandwidth subsystem whose
-failure strings include `Failed to allocate %u KBPS Iso and %u KBPS Dram`
-and `Unexpectedly failed to program post-modeset bandwidth!`. Bandwidth
-arbitration refusing a reconfiguration would fit — two 4K-class heads on one
-laptop dGPU, failing only at topology changes — but that is a candidate, not
-a finding.
+**The allocation is large and contiguous, and free video memory does not
+predict it.** A scanout buffer for the built-in panel is 3840x2400x4 =
+35.2 MiB in one piece. That can be unobtainable while hundreds of megabytes
+remain free in smaller pieces, so `memory.free` reads healthy throughout,
+which is why a refusal looks causeless when that is the number being watched.
+The quantity that does predict it is how many panel-sized scanout buffers a
+fresh client can still obtain. `gbm-scanout-probe` measures that, and each
+refusal snapshot records it per head.
+
+**Mutter holds the large blocks.** Its video-memory footprint grows while the
+session stays active and is not returned — a session active for days has been
+measured holding several gigabytes it is not using, against an 8 GiB card —
+and the whole accumulation is released when the session is reactivated. One
+observed step coincided with a DisplayPort MST detect, so display
+reconfiguration is a plausible driver of the growth, but a single step is not
+enough to call it the only one.
+
+**Why it cannot recover by itself.** On reactivation mutter allocates its new
+buffers before releasing the stale ones, so escaping the shortage needs
+headroom that the shortage is what denies. Deactivating the session is not
+enough on its own: the footprint is still held while the session sits
+inactive, and the release happens only once the new allocation has succeeded.
+Freeing large blocks from any other process breaks the deadlock, after which
+mutter returns everything it was holding.
+
+Display-bandwidth (IMP) arbitration is not needed to explain this. The severe
+form occurs with a single head attached, at a mode that was driving that head
+minutes earlier.
+
+**Upstream.** mutter issue 4101 and merge request 5285, "renderer/native:
+Don't keep around detached onscreens in power saving": the `detached_onscreens`
+list was cleared only from `meta_renderer_native_post_mode_set_updates` and
+from dispose, so nothing released it while the display sat in power saving,
+and hotplug events there grew it without bound. That matches the behaviour
+here exactly — a mode set is what reactivating the session performs, and it is
+the only thing that frees the accumulation.
+
+Fixed in mutter 49.8, 50.5 and 51.0. **Ubuntu 26.04 ships 50.1 and does not
+carry it**: the Launchpad tracking bug is 2167374, whose Resolute task is
+still open while the devel series is fixed. Check before assuming a
+reconfiguration is safe:
+
+```sh
+apt policy libmutter-18-0     # 50.5 or newer means fixed
+zcat /usr/share/doc/libmutter-18-0/changelog.Debian.gz | grep -c detached
+```
+
+Ubuntu already carries its own `ubuntu/onscreen-native-*.patch` stack against
+this file, so the absence is a backport that has not happened rather than a
+conflict that prevents one.
+
+### Recovery
+
+Any route that gets the session reactivated with enough headroom works, which
+is why a `gdm` restart always fixes it — at the cost of the session. To keep
+the session:
+
+1. Log in on a text VT (Ctrl+Alt+F3 or F4).
+2. `gbm-scanout-probe /dev/dri/cardN <panel-width> <panel-height> 4` against
+   the card owning the panel. A result of 0 or 1 confirms this fault rather
+   than a hung compositor; `gnome-shell` is alive and idle throughout.
+3. Free large blocks from anything cheap. The Electron and Chrome
+   `--type=gpu-process` helpers hold the largest and respawn by themselves.
+4. Re-probe until several buffers are obtainable, then Ctrl+Alt+F2 back.
+
+Bytes freed is the wrong thing to watch while doing this: releasing a couple
+of hundred megabytes can leave capacity unchanged, and the next release can
+take it from one buffer to dozens. Only the probe's count says whether the
+switch back will work.
 
 ### Instrumentation
 
@@ -1000,8 +1070,9 @@ the other.
 
 **`nvkms-refusal-snapshot.service`** (system; needs an NVIDIA render node)
 watches the kernel log and, the moment a refusal appears, appends framebuffer
-headroom, per-process GPU memory, the connected heads and their modes, and
-the surrounding `nvidia-modeset:` lines to `/var/log/nvkms-refusals.log`.
+headroom, per-process GPU memory, the connected heads with their modes and
+the scanout capacity measured at each, and the surrounding `nvidia-modeset:`
+lines to `/var/log/nvkms-refusals.log`.
 A periodic sampler is the wrong instrument for this on its own, because a
 burst can begin and end inside one sample period. Bursts collapse to one
 snapshot per minute: the first refusal is the informative one, and the
@@ -1010,6 +1081,18 @@ hundreds that can follow describe a GPU already in the failed state.
 Snapshot state is read a fraction of a second after the refusal, not at the
 instant of it — near enough that nothing else has moved, but it is a read of
 the aftermath rather than of the failing call.
+
+**The watcher can miss an episode outright.** A severe-form episode has been
+observed producing hundreds of `gbm_surface_lock_front_buffer` failures in
+the journal with *no* `Failed to allocate NVKMS memory` line at all, while
+another produced thousands. The kernel message is what this service triggers
+on, so a count of refusals in the journal is a floor, not a census. Searching
+for the mutter message as well is the way to find every episode.
+
+**`gbm-scanout-probe`** (`/usr/local/bin`, built by `provision` from
+`system/gpu-capture/`) is also usable by hand, and needs no DRM master, so it
+is safe to run against a live display. It allocates and frees, reporting how
+many buffers of a given geometry the card will hand a fresh client.
 
 **`sysmon.service`** (user unit, `dotfiles/sysmon.service`) runs
 `bin/sysmon.sh` at 10 s into `~/.local/state/sysmon/sysmon.csv`, giving the
