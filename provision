@@ -205,6 +205,7 @@ declare -a packages=(
     asciinema
     atool
     autoconf
+    automake
     autopoint
     autossh
     autotools-dev
@@ -245,6 +246,7 @@ declare -a packages=(
     gcc-multilib
     gdb-multiarch
     gettext
+    git
     gnome-tweaks
     gparted
     graphviz
@@ -264,6 +266,7 @@ declare -a packages=(
     libcairo2-dev
     libcurl4-openssl-dev
     libelf-dev
+    libevent-dev
     libfontconfig-dev
     libfreetype-dev
     libfuse3-dev
@@ -275,6 +278,7 @@ declare -a packages=(
     libgmp-dev
     libgtk-3-dev
     libharfbuzz-dev
+    libncurses-dev
     libngspice0-dev
     libnng-dev
     libocct-data-exchange-dev
@@ -354,7 +358,6 @@ declare -a packages=(
     sysstat
     texinfo
     tmate
-    tmux
     tree
     tshark
     unixodbc-dev
@@ -1093,6 +1096,82 @@ if [ "$gdfuse_unit_changed" = true ]; then
     systemctl --user --machine="$SUDO_USER@.host" try-restart "$GDFUSE_UNIT" 2> /dev/null || true
 fi
 systemctl --user --machine="$SUDO_USER@.host" start "$GDFUSE_UNIT" 2> /dev/null || true
+
+# =============================================================================
+banner "tmux (fork build)"
+# =============================================================================
+
+# Built from our fork rather than the archive: a released tmux speaks only the
+# legacy key encoding, where Shift+Enter is the same bytes as Enter and Ctrl+I
+# the same as Tab, so no program in a pane can tell them apart. The branch is
+# upstream master plus the Kitty keyboard protocol series in review as
+# tmux/tmux#5615, and three fixes of ours -- modified Enter/Tab/Backspace under
+# the protocol's disambiguate flag, application escape key mode as a terminal
+# feature (tmux/tmux#5626), and a capture race in a regression test
+# (tmux/tmux#5627). Bump TMUX_COMMIT to roll the pin; the stamp is what stops a
+# rerun from rebuilding. Once the series is released this section goes back to
+# the archive package, and the pin and the apt block come out with it.
+declare -r TMUX_REPO=https://github.com/pdietl/tmux
+declare -r TMUX_BRANCH=local-build
+declare -r TMUX_COMMIT=3fa1a61b72002a06dd2b00758f4d16f90e481270
+declare -r TMUX_BIN=/usr/local/bin/tmux
+declare -r TMUX_STAMP=/usr/local/share/tmux.commit
+
+if [ -x "$TMUX_BIN" ] && [ "$(cat "$TMUX_STAMP" 2> /dev/null || true)" = "$TMUX_COMMIT" ]; then
+    echo "  $TMUX_BIN already built from $TMUX_COMMIT"
+else
+    echo "  Building tmux $TMUX_BRANCH ($TMUX_COMMIT) as $SUDO_USER..."
+    tmux_build_dir=$(sudo -u "$SUDO_USER" mktemp -d /tmp/tmux-build.XXXXXX)
+    # Checked out by commit rather than left at the branch tip, so what lands
+    # here is the revision this file names even after the branch has moved.
+    sudo -u "$SUDO_USER" bash -ec "
+        git clone -q --branch '$TMUX_BRANCH' '$TMUX_REPO' '$tmux_build_dir/src'
+        cd '$tmux_build_dir/src'
+        git checkout -q '$TMUX_COMMIT'
+        sh autogen.sh
+        ./configure --prefix=/usr/local
+        make -j\$(nproc)
+    " > /dev/null
+    # The man page comes from this build too: it documents options that exist
+    # in no released tmux.
+    make -C "$tmux_build_dir/src" install > /dev/null
+    echo "$TMUX_COMMIT" > "$TMUX_STAMP"
+    rm -rf "$tmux_build_dir"
+fi
+
+# Removed only after a successful build, so a failed one never leaves the
+# machine with no tmux at all. Nothing in the archive depends on the package.
+if pkg_installed tmux; then
+    echo "  tmux: removing the apt build"
+    _apt_get remove -y tmux
+fi
+apt_block tmux tmux
+
+# Read back through the binary rather than trusting make install: this option
+# value exists only in the keyboard series and a released tmux answers
+# "unknown value", so accepting it is what proves the tmux now on PATH is this
+# build rather than an archive one somewhere ahead of it.
+tmux_check_sock=provision-tmux-$$
+if ! "$TMUX_BIN" -L "$tmux_check_sock" -f /dev/null start-server \; \
+    set -s extended-keys-format kitty 2> /dev/null; then
+    "$TMUX_BIN" -L "$tmux_check_sock" kill-server 2> /dev/null || true
+    echo "  tmux: $TMUX_BIN does not have the Kitty keyboard protocol" >&2
+    exit 1
+fi
+"$TMUX_BIN" -L "$tmux_check_sock" kill-server 2> /dev/null || true
+echo "  tmux: $("$TMUX_BIN" -V), Kitty keyboard protocol present"
+
+# A server goes on running the binary it was started from, and it is the server
+# that parses keys and holds the options, so a session predating this run keeps
+# the old behaviour however new the client attaching to it is. Attaching still
+# works, so this is worth saying rather than acting on: ending someone's
+# sessions to converge the machine is not this script's call.
+tmux_old_servers=$(pgrep -x 'tmux: server' -u "$SUDO_USER" 2> /dev/null | wc -l)
+if [ "$tmux_old_servers" -gt 0 ]; then
+    echo "  NOTE: $tmux_old_servers tmux server(s) still run the previous binary."
+    echo "        Their sessions keep the old key handling until they exit;"
+    echo "        'tmux kill-server' switches over at the cost of those sessions."
+fi
 
 # =============================================================================
 banner "NVIDIA driver: hold from unattended-upgrades"

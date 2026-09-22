@@ -25,7 +25,7 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   `current-theme.conf` (owned by `kitten themes`). Tool installs stay
   guarded on the tool being absent, so nothing here updates them, `bin/do_update`
   included: it covers apt and snap only. A leaf tool installed from upstream
-  (starship, awscli, neovim, nix, kitty, google-drive-ocamlfuse) also has its
+  (starship, awscli, neovim, nix, kitty, tmux, google-drive-ocamlfuse) also has its
   apt packages blocked by `apt_block`, which writes a negative pin to
   `/etc/apt/preferences.d/upstream-<tool>` and reads it back through
   `apt-cache policy`; it refuses while an apt copy is still installed. The
@@ -59,6 +59,21 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   `kitty/theme-overrides.conf`, included after the theme. kitty updates by
   re-running its installer with `dest=/usr/local`; the symlinks and the
   terminfo link follow the new bundle without a `provision` run.
+  tmux is likewise a source build, from our fork `pdietl/tmux` branch
+  `local-build`, pinned by `TMUX_COMMIT` and stamped at
+  `/usr/local/share/tmux.commit`: it is upstream master plus the Kitty
+  keyboard protocol series under review as tmux/tmux#5615 and three fixes of
+  ours, so Shift+Enter and Ctrl+I reach a pane distinguishable from Enter and
+  Tab, which no released tmux can do. `provision` reads the install back by
+  setting `extended-keys-format kitty`, a value a released tmux rejects. The
+  companion `extended-keys on` lives in `dotfiles/tmux.conf`; without it a
+  program's protocol request is dropped silently. A running server goes on
+  executing the binary it started from, and the server is what parses keys and
+  holds the options, so a session predating a run keeps the old behaviour
+  however new the client attaching to it is; attaching itself still works, and
+  `provision` says so rather than ending anyone's sessions.
+  Roll the pin by bumping `TMUX_COMMIT`; once the series is released, drop the
+  build, the pin and the apt block and go back to the archive package.
 - **`bin/`** — user scripts copied to `~/bin` (on `$PATH`): `netinfo`,
   `do_cscope`, `do_update`, `ntfy`, `wsl_usb_attach`/`detach`, `reset`,
   `sysmon.sh` (system + GPU monitor, screen + file logging; period from
