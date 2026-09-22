@@ -5,10 +5,11 @@ set -u
 #
 # nvidia-drm reports every such refusal as one generic message and a bare
 # -EINVAL, so the diagnosis has to come from what surrounds it: framebuffer
-# headroom, who is holding it, and the display topology whose bandwidth the
-# modeset driver was arbitrating. None of that can be asked for after the
-# fact, and a periodic sampler is a poor fit because a burst can begin and
-# end inside one sample period.
+# headroom, who is holding it, whether a buffer the size of a live head can
+# still be obtained, and the display topology whose bandwidth the modeset
+# driver was arbitrating. None of that can be asked for after the fact, and a
+# periodic sampler is a poor fit because a burst can begin and end inside one
+# sample period.
 #
 # The modeset debug lines are captured alongside, since with
 # nvidia_modeset debug=1 the actual reason is logged there and nowhere else.
@@ -33,6 +34,14 @@ declare -r COOLDOWN=60
 # How far back to reach for context. The refusal is the tail of a modeset
 # that began earlier, so the reason usually precedes it rather than follows.
 declare -r CONTEXT_SECONDS=90
+
+# Installed beside this script. Where it is absent capacity goes unreported
+# and the rest of the snapshot is unaffected.
+declare -r PROBE=/usr/local/bin/gbm-scanout-probe
+
+# Deliberately low. Zero, one and "several" carry the whole signal, and the
+# probe competes for the same memory as the compositor it is diagnosing.
+declare -r PROBE_MAX=4
 
 emit() {
     printf '%s\n' "$*" >> "$LOG"
@@ -75,16 +84,34 @@ snapshot() {
     fi
 
     # Topology is what display-bandwidth arbitration is computed over, so a
-    # refusal is only interpretable next to the heads that were live.
+    # refusal is only interpretable next to the heads that were live. The
+    # probe answers the other half: free video memory does not predict a
+    # refusal, because a scanout buffer must be contiguous and one the size of
+    # a head's mode can be unobtainable while plenty remains free in smaller
+    # pieces. Probing at each head's own mode measures the allocation a
+    # compositor has to make to bring that head up.
+    #
+    # The probe's refusals reach the kernel log this watcher tails. That costs
+    # nothing: the cooldown above already collapses a burst to one snapshot,
+    # so a probe run cannot provoke another.
     emit ""
-    emit "--- connectors ---"
-    local c status mode
+    emit "--- connectors and scanout capacity ---"
+    local c status mode card w h cap
     for c in /sys/class/drm/card*-*; do
         [ -e "$c/status" ] || continue
         status=$(cat "$c/status" 2> /dev/null)
         [ "$status" = connected ] || continue
         mode=$(head -1 "$c/modes" 2> /dev/null)
         emit "$(basename "$c")  ${mode:-<no modes>}"
+        [ -x "$PROBE" ] || continue
+        [ -n "$mode" ] || continue
+        card=/dev/dri/${c##*/}
+        card=${card%%-*}
+        w=${mode%%x*}
+        h=${mode##*x}
+        cap=$("$PROBE" "$card" "$w" "$h" "$PROBE_MAX" 2>&1) \
+            || cap="probe failed: $cap"
+        emit "    $cap"
     done
 
     emit ""
