@@ -180,3 +180,15 @@ never as a source of facts to act on.
   `Failed to allocate %u KBPS Iso and %u KBPS Dram` and `Unexpectedly failed
   to program post-modeset bandwidth!`, neither of which has been observed on
   this machine.
+- **2026-09-23** — rebooted into kernel 7.0.0-34 with no NVIDIA module:
+  panel on `simpledrm`, a software cursor, and cursor ghosting. It was first
+  suspected to be the mutter backport installed the same hour, then wrongly
+  pinned on the unattended-upgrades hold. The kernel had come in the evening
+  before through `provision`'s `apt-get install` step, which moved
+  `linux-generic-hwe-24.04` after `apt-get upgrade` had held the NVIDIA module
+  metapackage back; unattended-upgrades cannot see `-updates`, the only pocket
+  that kernel was in. The hold is not innocent in general, though: on
+  2026-09-04 unattended-upgrades installed kernel 7.0.0-31 from `-security`
+  without its module, and a manual upgrade supplied it twelve hours later,
+  before any reboot. Loading the module into the running kernel and starting a
+  new session recovered without a reboot.

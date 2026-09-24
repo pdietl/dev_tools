@@ -556,12 +556,19 @@ bleeding-edge Blackwell + open kernel module is fragile there to begin with.
 
 ### Mitigation: hold the NVIDIA stack out of unattended-upgrades
 
-Repo `system/apt/52nvidia-unattended-hold`, installed by `provision` (non-WSL) to
-`/etc/apt/apt.conf.d/52nvidia-unattended-hold`. It blacklists the NVIDIA
+Repo `system/apt/52nvidia-unattended-hold`, installed by `provision` to
+`/etc/apt/apt.conf.d/52nvidia-unattended-hold` wherever the NVIDIA userspace
+driver is installed, and removed where it is not. It blacklists the NVIDIA
 stack from the **automatic** path only, so the driver is never live-swapped
-in the background; it now moves solely during a deliberate `apt upgrade` the
-user follows with a reboot. Interactive apt is unaffected, and the file is
-inert on a machine with no NVIDIA packages.
+in the background; it moves solely during a deliberate `apt upgrade` the user
+follows with a reboot. Interactive apt is unaffected.
+
+It holds the kernel too: the kernel metapackages and every per-kernel image
+and module package, the ZFS modules included. The prebuilt NVIDIA module is a
+separate package per kernel, so holding the stack alone let
+unattended-upgrades install a kernel with no module for it (see "Boot: a
+kernel without its NVIDIA module" below). Headers, tools, firmware and
+`linux-libc-dev` are not held; none of them decides what boots.
 
 The blacklist entry is **`.*nvidia`**, not `nvidia`: unattended-upgrades
 anchors each entry at the start (`re.match`; it builds an apt pin `/^entry/`),
@@ -572,8 +579,9 @@ the split itself. Verified against u-u's own matching: `.*nvidia` holds 21/21
 installed stack packages, `nvidia` only 8. The header comment in the file
 carries this warning; do not "simplify" the pattern.
 
-Trade-off: background *security* updates to the NVIDIA stack are deferred to
-that manual upgrade. Accepted — a wedged reboot is worse.
+Trade-off: background *security* updates to the NVIDIA stack and to the
+kernel are deferred to that manual upgrade. Accepted — a wedged reboot, or a
+kernel that boots without its GPU driver, is worse.
 
 ### Reducing exposure without the fix
 
@@ -585,6 +593,49 @@ that manual upgrade. Accepted — a wedged reboot is worse.
   reboots more reliably here.
 
 ---
+
+## Boot: a kernel without its NVIDIA module
+
+**Symptom:** after a reboot the desktop comes up, but cursor trails and stale
+regions ghost across the screen as it changes. `/proc/driver/nvidia/version`
+is missing, the panel's connector hangs off a `simple-framebuffer` card, and
+mutter logs `Couldn't find suitable cursor plane format … disabling HW
+cursor`. The booted kernel has no NVIDIA module, so the panel is on the
+firmware framebuffer (`simpledrm`) with a software cursor, rendered on the
+iGPU and copied across by the CPU.
+
+**Cause:** the prebuilt module is a separate package per kernel
+(`linux-modules-nvidia-595-open-<kver>`), pulled in by a metapackage, so every
+new kernel needs a new package beside it. Two paths install a kernel without
+one:
+
+- `apt-get upgrade` holds back any upgrade that needs a new package, while an
+  `apt-get install` of some other package can still move the kernel
+  metapackage forward on its own. `provision` upgrades with
+  `--with-new-pkgs`, so the kernel and module metapackages advance together.
+- unattended-upgrades installs kernels from `-security`, and a hold on the
+  NVIDIA stack alone keeps the module metapackage back. The hold above
+  therefore covers the kernel as well, so unattended-upgrades moves neither.
+
+**Check:** `nvidia-module-check` (repo `system/nvidia-module-check/`, installed
+to `/usr/local/sbin`) checks every kernel in `/boot` for an `nvidia` module
+whose version matches the installed `libnvidia-gl` userspace, and reports an
+empty `/boot` as a failure rather than a pass. `provision` runs it and stops
+naming any kernel that fails. An apt `DPkg::Post-Invoke` hook
+(`/etc/apt/apt.conf.d/54nvidia-module-check`) runs it after every dpkg
+transaction and sends an `ntfy` alert naming the host, through a root-owned
+copy of `bin/ntfy` in `/usr/local/sbin`; it never fails the transaction,
+because the fix is another apt run. By hand:
+
+```sh
+cat /proc/driver/nvidia/version         # the running kernel
+modinfo -k <kver> -F version nvidia     # any installed kernel
+```
+
+**Fix:** `apt-get upgrade --with-new-pkgs`, or install
+`linux-modules-nvidia-595-open-generic-hwe-26.04`, and confirm with `modinfo`
+before booting that kernel. On a kernel already booted without it, loading
+the module and starting a new session recovers without a reboot.
 
 ## Idle hang: docked, lid closed, dGPU externals live
 
