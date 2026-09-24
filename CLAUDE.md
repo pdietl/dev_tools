@@ -117,6 +117,14 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
     configs cap that log and `sysmon`'s. Gated on an NVIDIA render node, so
     inert elsewhere. The `sysmon.service` user unit that pairs with it lives
     in `dotfiles/` with the other things installed into `$HOME`.
+  - **`system/mutter-backport/`** — a local rebuild of Ubuntu's mutter with
+    the upstream fix for GPU memory that detached onscreens accumulate during
+    power saving, the leak behind the dGPU scanout-allocation refusal.
+    `patches/` holds the gnome-50 cherry-picks and `build-mutter-backport`
+    rebuilds exactly the archive version it names, then prints the install
+    command. Built and installed by hand, **not** by `provision`: it needs
+    `deb-src` for the Ubuntu archive and the build dependencies, and it goes
+    away once the archive ships the fix.
   - **`system/suspend/`** — suspend/resume mitigations: `gdfuse-suspend-guard`
     (every non-WSL machine) plus per-model sets gated on
     `dmidecode -s system-version` (`p16-gen3/`). Rationale lives in the
@@ -205,6 +213,10 @@ telemetry to `~/.local/state/sysmon/`. The logs are size-capped by logrotate.
 `/etc/modprobe.d/nvidia-modeset-debug.conf` (`nvidia_modeset debug=1`,
 hand-applied, **not** installed by `provision`) stays armed for the modeset
 reason lines.
+The leak behind it is mutter's, fixed upstream in 50.5 while Ubuntu 26.04
+ships 50.1. This install runs the local `50.1-0ubuntu2.4+pdietl1` from
+`system/mutter-backport/` (installed 2026-09-23); any archive mutter upgrade
+replaces it, so after one, run the check in the build script's header.
 
 ### External displays over USB-C / MST → `machine-notes/thinkpad-p16-gen3-ubuntu-external-displays.md`
 How DP Alt Mode lane count follows the monitor's USB-C data setting (and

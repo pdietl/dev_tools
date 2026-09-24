@@ -1,0 +1,33 @@
+From fdf37389dc6c7327884def1dddd2930d99a1f76b Mon Sep 17 00:00:00 2001
+From: Gamblit <gnome@gamblit.org>
+Date: Mon, 27 Jul 2026 00:12:27 -0500
+Subject: [PATCH] backend/native Do not keep references to offscreens on detach
+
+Offscreen virtual CRTCs are never scanned out and retaining them creates a VRAM leak.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/5197>
+(cherry picked from commit 82ad62795fc72ca5262681ffe100f21534348a58)
+---
+ src/backends/native/meta-renderer-native.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/backends/native/meta-renderer-native.c b/src/backends/native/meta-renderer-native.c
+index 060c2d7c87..997e0f4273 100644
+--- a/src/backends/native/meta-renderer-native.c
++++ b/src/backends/native/meta-renderer-native.c
+@@ -1663,8 +1663,10 @@ detach_onscreens (MetaRenderer *renderer)
+       ClutterStageView *stage_view = l->data;
+       CoglFramebuffer *onscreen = clutter_stage_view_get_onscreen (stage_view);
+ 
+-      if (META_IS_ONSCREEN_NATIVE (onscreen))
+-        meta_onscreen_native_detach (META_ONSCREEN_NATIVE (onscreen));
++      if (!META_IS_ONSCREEN_NATIVE (onscreen))
++        continue;
++
++      meta_onscreen_native_detach (META_ONSCREEN_NATIVE (onscreen));
+ 
+       renderer_native->detached_onscreens =
+         g_list_prepend (renderer_native->detached_onscreens,
+-- 
+2.53.0
+

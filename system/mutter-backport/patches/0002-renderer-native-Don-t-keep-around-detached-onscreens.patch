@@ -1,0 +1,83 @@
+From af0c9808d93e5ba3577e3c97250944aa1483a3c6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michel=20D=C3=A4nzer?= <mdaenzer@redhat.com>
+Date: Mon, 31 Aug 2026 19:00:05 +0200
+Subject: [PATCH] renderer/native: Don't keep around detached onscreens in
+ power saving
+
+clear_detached_onscreens was previously called only from
+meta_renderer_native_post_mode_set_updates (and
+meta_renderer_native_dispose, which is called only on shutdown), which
+isn't called during power saving. This resulted in the
+detached_onscreens list and corresponding GPU memory usage growing
+unlimited e.g. due to hotplug events during power saving.
+
+Fix it by calling clear_detached_onscreens from
+on_power_save_mode_changed when entering power saving, and by bailing
+from maybe_detach_onscreens while in power saving. The purpose of the
+detached_onscreens list is to avoid drmModeRmFB implicitly turning off
+the KMS plane and potentially even CRTC, which isn't necessary during
+power saving, since they are intentionally off anyway.
+
+Closes: https://gitlab.gnome.org/GNOME/mutter/-/work_items/4101
+Closes: https://gitlab.gnome.org/GNOME/mutter/-/work_items/5008
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/5285>
+(cherry picked from commit af926cffa0702d1fbd0f2b87f9adbfcb8be0e9f6)
+---
+ src/backends/native/meta-renderer-native.c | 21 +++++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/src/backends/native/meta-renderer-native.c b/src/backends/native/meta-renderer-native.c
+index 997e0f4273..66b0e1e008 100644
+--- a/src/backends/native/meta-renderer-native.c
++++ b/src/backends/native/meta-renderer-native.c
+@@ -1651,12 +1651,20 @@ meta_renderer_native_create_view (MetaRenderer        *renderer,
+ }
+ 
+ static void
+-detach_onscreens (MetaRenderer *renderer)
++maybe_detach_onscreens (MetaRenderer *renderer)
+ {
+   MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
++  MetaBackend *backend = meta_renderer_get_backend (renderer);
++  MetaMonitorManager *monitor_manager =
++    meta_backend_get_monitor_manager (backend);
++  MetaPowerSave power_save_mode;
+   GList *views;
+   GList *l;
+ 
++  power_save_mode = meta_monitor_manager_get_power_save_mode (monitor_manager);
++  if (power_save_mode != META_POWER_SAVE_ON)
++    return;
++
+   views = meta_renderer_get_views (renderer);
+   for (l = views; l; l = l->next)
+     {
+@@ -1708,7 +1716,7 @@ meta_renderer_native_rebuild_views (MetaRenderer *renderer)
+   meta_kms_discard_pending_page_flips (kms);
+   g_hash_table_remove_all (renderer_native->mode_set_updates);
+ 
+-  detach_onscreens (renderer);
++  maybe_detach_onscreens (renderer);
+ 
+   parent_renderer_class->rebuild_views (renderer);
+ 
+@@ -2297,9 +2305,14 @@ on_power_save_mode_changed (MetaMonitorManager        *monitor_manager,
+   power_save_mode = meta_monitor_manager_get_power_save_mode (monitor_manager);
+   if (power_save_mode == META_POWER_SAVE_ON &&
+       reason == META_POWER_SAVE_CHANGE_REASON_MODE_CHANGE)
+-    meta_renderer_native_queue_modes_reset (renderer_native);
++    {
++      meta_renderer_native_queue_modes_reset (renderer_native);
++    }
+   else
+-    meta_kms_discard_pending_page_flips (kms);
++    {
++      clear_detached_onscreens (renderer_native);
++      meta_kms_discard_pending_page_flips (kms);
++    }
+ }
+ 
+ void
+-- 
+2.53.0
+

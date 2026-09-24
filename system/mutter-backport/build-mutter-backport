@@ -1,0 +1,148 @@
+#!/bin/bash
+set -euo pipefail
+
+# Rebuild Ubuntu's mutter with the upstream fix for GPU memory that detached
+# onscreens accumulate while the display is in power saving.
+#
+# Without it, each display reconfiguration during power saving (lid closed,
+# hotplug, a monitor scanning its inputs) retains another set of framebuffers,
+# and nothing releases them until the session is next reactivated. Where the
+# panel scans out from a discrete GPU, the panel eventually cannot get a
+# framebuffer and the desktop does not come back after resume.
+#
+# patches/ holds the gnome-50 cherry-picks in upstream order, fixed in mutter
+# 49.8, 50.5 and 51.0. They are applied to exactly UBUNTU_VERSION, so the
+# result differs from the archive package by these patches alone. dpkg-source
+# applies them with fuzz disabled, so a patch whose context no longer matches
+# fails the build instead of landing somewhere it changes what the code does.
+#
+# The local version sorts after UBUNTU_VERSION and before any later archive
+# upload, so the next Ubuntu mutter replaces this build on an ordinary upgrade.
+# Check that upgrade still carries the fix before trusting it:
+#   zcat /usr/share/doc/libmutter-18-0/changelog.Debian.gz | grep -c detached
+#
+# usage: build-mutter-backport [workdir]
+#   workdir must not exist; default ~/.cache/dev_tools/mutter-backport-<version>
+# Needs deb-src for the Ubuntu archive and `sudo apt-get build-dep mutter`.
+# Installs nothing: it ends by printing the apt command for what it built.
+#
+# Revert an installed build: sudo apt install --allow-downgrades
+#   libmutter-18-0=<UBUNTU_VERSION> (and the other packages it printed)
+
+declare -r UBUNTU_VERSION=50.1-0ubuntu2.4
+declare -r LOCAL_VERSION=${UBUNTU_VERSION}+pdietl1
+declare -r PATCH_SUBDIR=detached-onscreens
+
+# Exported by the patches for their tests; Ubuntu's symbols file for
+# libmutter-18.so.0 does not list them, and dpkg-gensymbols fails the build
+# on a symbol it was not told about.
+declare -ra NEW_SYMBOLS=(
+    meta_monitor_manager_get_power_save_mode
+    meta_monitor_manager_set_power_save_mode
+    meta_monitor_set_gamma_lut
+)
+
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+WORK=${1:-$HOME/.cache/dev_tools/mutter-backport-$LOCAL_VERSION}
+
+if [ -e "$WORK" ]; then
+    echo "refusing to reuse $WORK; pass a directory that does not exist" >&2
+    exit 1
+fi
+
+shopt -s nullglob
+patches=("$HERE"/patches/*.patch)
+shopt -u nullglob
+if [ ${#patches[@]} -eq 0 ]; then
+    echo "no patches found in $HERE/patches" >&2
+    exit 1
+fi
+
+name=$(git -C "$HERE" config --get user.name) || true
+email=$(git -C "$HERE" config --get user.email) || true
+if [ -z "$name" ] || [ -z "$email" ]; then
+    echo "git user.name and user.email are needed for the changelog" >&2
+    exit 1
+fi
+
+mkdir -p "$WORK"
+cd "$WORK"
+apt-get source "mutter=$UBUNTU_VERSION"
+cd "mutter-${UBUNTU_VERSION%%-*}"
+
+got=$(dpkg-parsechangelog -S Version)
+if [ "$got" != "$UBUNTU_VERSION" ]; then
+    echo "unpacked mutter $got, expected $UBUNTU_VERSION" >&2
+    exit 1
+fi
+
+mkdir "debian/patches/$PATCH_SUBDIR"
+for p in "${patches[@]}"; do
+    cp "$p" "debian/patches/$PATCH_SUBDIR/"
+    echo "$PATCH_SUBDIR/$(basename "$p")" >> debian/patches/series
+done
+
+# Append to the end of the libmutter-18.so.0 section; a section runs from its
+# header line to the next header or the end of the file.
+symbols=debian/libmutter-18-0.symbols
+awk -v ver="$LOCAL_VERSION" -v syms="${NEW_SYMBOLS[*]}" '
+    function flush(   n, a, i) {
+        n = split(syms, a, " ")
+        for (i = 1; i <= n; i++) print " " a[i] "@Base " ver
+        added++
+    }
+    /^[^ #*|]/ { if (in_lib) flush(); in_lib = ($1 == "libmutter-18.so.0") }
+    { print }
+    END { if (in_lib) flush(); if (added != 1) exit 1 }
+' "$symbols" > "$symbols.new"
+mv "$symbols.new" "$symbols"
+
+# A format-patch Subject header folds long titles onto continuation lines.
+subject() {
+    awk '/^Subject: /{s=substr($0,10); while ((getline l) > 0 && l ~ /^ /) s=s l;
+         sub(/^\[PATCH\] /,"",s); print s; exit}' "$1"
+}
+
+{
+    printf 'mutter (%s) %s; urgency=medium\n\n' \
+        "$LOCAL_VERSION" "$(dpkg-parsechangelog -S Distribution)"
+    printf '  * Backport the fix for detached onscreens accumulating GPU memory\n'
+    printf '    during power saving, with the change it was written against and\n'
+    printf '    its follow-up:\n'
+    for p in "${patches[@]}"; do
+        printf '    - %s\n' "$(subject "$p")"
+    done
+    printf '\n -- %s <%s>  %s\n\n' "$name" "$email" "$(date -R)"
+    cat debian/changelog
+} > debian/changelog.new
+mv debian/changelog.new debian/changelog
+
+got=$(dpkg-parsechangelog -S Version)
+if [ "$got" != "$LOCAL_VERSION" ]; then
+    echo "changelog reads $got after editing, expected $LOCAL_VERSION" >&2
+    exit 1
+fi
+
+dpkg-checkbuilddeps
+DEB_BUILD_OPTIONS="nocheck parallel=$(nproc)" dpkg-buildpackage -b -uc -us
+
+# Offer only the packages already installed here, at the version just built.
+cd "$WORK"
+debs=()
+while read -r pkg; do
+    for f in "${pkg}_${LOCAL_VERSION}_"*.deb; do
+        [ -e "$f" ] && debs+=("$WORK/$f")
+    done
+done < <(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' \
+    'libmutter-*' 'gir1.2-mutter-*' 'mutter*' 2>/dev/null |
+    awk '$1 == "ii" { print $2 }')
+
+if [ ${#debs[@]} -eq 0 ]; then
+    echo "built, but none of the resulting packages are installed here" >&2
+    exit 1
+fi
+echo
+echo "built $LOCAL_VERSION. Install with:"
+printf '  sudo apt install'
+printf ' \\\n    %s' "${debs[@]}"
+printf '\n'
