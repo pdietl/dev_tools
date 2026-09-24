@@ -57,3 +57,11 @@ holds present state; read this only for the provenance of a conclusion.
   and the sealed-policy verification there; filed the manufacturing-mode false
   positive as #572, since it existed only in comments on unrelated issues and
   fwupd had dropped the same test in January 2025.
+- **2026-09-23** — Canonical asked on #572 for Intel documentation of the
+  HFSTS bits. None is public. The NDA CSME BIOS Specification (#627331 ADL,
+  #729124 MTL, cited in coreboot CLs 69324 and 69578) lists bit 21 among its
+  §3.6.1 production criteria, and Intel's public CSME Security White Paper
+  (#631900 §6.1) describes EoM as three steps that "flexible EoM" only stages.
+  The "false positive" rests on Lenovo's "Flexible OEM" statement in
+  fwupd/fwupd#7180 alone. The reply said so and corrected the issue's
+  fwupd/firmware-lenovo#495 reference, an unrelated CSME 16 unit.

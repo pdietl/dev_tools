@@ -91,12 +91,18 @@ the token and log reads.
 
 ## Related: the installer's "manufacturing mode" warning
 
-The installer showed `NO_HARDWARE_ROOT_OF_TRUST … checking Intel BootGuard
-configuration … system is in manufacturing mode` on this platform, and then
-required a PIN or passphrase. That is a false positive: secboot's CSME 18+ check
-requires HFSTS6 bit 21 (MfgLock), which stays clear on fused Lenovo units that
-use Intel's Flexible EOM (on this unit HFSTS6 is `0x40000000`, HFSTS1
-`0x90000245`), while fwupd reads the same registers and reports Boot Guard
-enabled and manufacturing mode locked. fwupd removed its equivalent test in
-2025. Reported as https://github.com/canonical/secboot/issues/572. "Ignore and
-continue" is the right answer; a passphrase is wanted on a laptop anyway.
+The installer shows `NO_HARDWARE_ROOT_OF_TRUST … checking Intel BootGuard
+configuration … system is in manufacturing mode` on this platform and then
+requires a PIN or passphrase. secboot's CSME 18+ check follows Intel's CSME BIOS
+Specification (NDA; §3.6.1 "Intel CSME Production Machine Determination"): a
+platform is in production only when the FPFs are committed (HFSTS6 bit 30), the
+SPI descriptor is locked (HFSTS1 bit 4 clear) and the manufacturing variables
+are locked (HFSTS6 bit 21). On this unit the first two hold and bit 21 is clear
+(HFSTS6 `0x40000000`, HFSTS1 `0x90000245`), as on other current Lenovo Intel
+models. Lenovo says bit 21 does not apply to its platforms, which use an Intel
+feature it calls "Flexible OEM"; fwupd dropped its bit-21 test on that word,
+which is why fwupd reports HSI:3 here. No Intel source confirms the exemption,
+so whether the warning is right is open in
+https://github.com/canonical/secboot/issues/572; the thread has the Intel
+document numbers and the public references. "Ignore and continue" is still the
+practical answer; a passphrase is wanted on a laptop anyway.

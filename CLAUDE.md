@@ -245,8 +245,9 @@ hardware-backed encryption asks for the recovery key on every boot until
 Security ▸ Absolute Persistence Module is set to Disabled: its firmware agent
 is measured into PCR 2 after the separator, where the sealing code never
 looks. The installer's "system is in manufacturing mode" warning on this
-platform is a false positive. Both are reported upstream; the note has the
-issue numbers and the per-boot check.
+platform comes from a CSME lock bit that Intel's spec counts and Lenovo says
+does not apply to its platforms; that one is disputed upstream. Both are
+reported upstream; the note has the issue numbers and the per-boot check.
 
 ### Crash capture (applied 2026-07-25)
 Two hard hangs in two days (2026-07-24 reboot teardown, 2026-07-25 idle),
