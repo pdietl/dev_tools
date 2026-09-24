@@ -991,19 +991,35 @@ and hotplug events there grew it without bound. That matches the behaviour
 here exactly — a mode set is what reactivating the session performs, and it is
 the only thing that frees the accumulation.
 
-Fixed in mutter 49.8, 50.5 and 51.0. **Ubuntu 26.04 ships 50.1 and does not
-carry it**: the Launchpad tracking bug is 2167374, whose Resolute task is
-still open while the devel series is fixed. Check before assuming a
-reconfiguration is safe:
+Fixed in mutter 49.8, 50.5 and 51.0. Ubuntu 26.04 ships 50.1 without it; the
+Launchpad tracking bug is 2167374, whose Resolute task is still open while the
+devel series is fixed. Ubuntu already carries its own
+`ubuntu/onscreen-native-*.patch` stack against this file, so the absence is a
+backport that has not happened rather than a conflict that prevents one.
+
+**This install runs a local backport**, `50.1-0ubuntu2.4+pdietl1`, built by
+`system/mutter-backport/build-mutter-backport` (installed 2026-09-23). It is the
+archive package plus four gnome-50 commits: the fix itself; the change it was
+written against, which skips non-native onscreens rather than retaining them;
+a test helper; and a follow-up without which onscreens kept through power
+saving still react to gamma and privacy-screen changes after their view is
+freed. It takes effect only in a `gnome-shell` started after the install.
+
+Its version sorts below any later archive upload, so an ordinary upgrade
+replaces it. Check after any mutter upgrade:
 
 ```sh
-apt policy libmutter-18-0     # 50.5 or newer means fixed
+apt policy libmutter-18-0     # 50.5 or newer, or +pdietl, means fixed
 zcat /usr/share/doc/libmutter-18-0/changelog.Debian.gz | grep -c detached
 ```
 
-Ubuntu already carries its own `ubuntu/onscreen-native-*.patch` stack against
-this file, so the absence is a backport that has not happened rather than a
-conflict that prevents one.
+Revert with `apt install --allow-downgrades` of `libmutter-18-0`,
+`gir1.2-mutter-18`, `mutter-common` and `mutter-common-bin` at
+`50.1-0ubuntu2.4`. An offline copy of those four packages and a `rollback.sh`
+sit in `~/.cache/dev_tools/mutter-original-50.1-0ubuntu2.4/`, for reverting
+from a text VT with no network. Building needs `apt-get build-dep mutter` and
+`/etc/apt/sources.list.d/ubuntu-src.sources`, which enables `deb-src` for the
+Ubuntu archive beside the untouched `ubuntu.sources`; deleting it reverts it.
 
 ### Recovery
 
