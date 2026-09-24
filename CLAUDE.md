@@ -302,8 +302,8 @@ only the home dataset opts in. Recover with
 directory sits at the dataset **mountpoint** (`/home`), not under `~`, and
 snapshot names carry UTC time. Motivation: a chained `mv … ; rm -rf …` on
 2026-09-15 destroyed the only copy of a directory's untracked history and
-there was no snapshot to restore from. Inert on the WWAN unit (LVM/ext4) and
-under WSL; applies to pdietl-home-ubun if its `/home` is ZFS.
+there was no snapshot to restore from. Inert on pdietl-home-ubun and the WWAN
+unit (both ext4 `/home`) and under WSL.
 
 ### Chrome HEVC hardware decode
 Chrome has no software HEVC decoder, so H.265 does not play at all unless
@@ -379,7 +379,9 @@ unit enabled and `~/GoogleDrive` mounting (OAuth completed),
 Chrome VA-API verified (direct backend, 6 HEVC profiles on the NVIDIA
 render node), NVIDIA unattended-upgrades hold and journal hygiene applied.
 DMI system-version is not a ThinkPad, so the model-gated suspend/HiDPI
-sections are inert here. No machine-fix notes yet — add
+sections are inert here. `/home` is ext4 on the root filesystem, not ZFS, so
+the home-snapshot section is inert too and there are no snapshots to recover
+from. No machine-fix notes yet — add
 `machine-notes/<file>.md` when the first real fix lands.
 
 ## Machine — pdietl-laptop-wwan (WWAN test unit)
