@@ -100,6 +100,51 @@ EOF
     echo "  apt block ($tool): $*"
 }
 
+# Installs a language server as the user unless its probe already succeeds,
+# then requires the probe to pass. The probe runs the server rather than
+# looking for a file: rustup's rust-analyzer proxy exists before it works.
+lsp_server() {
+    local name=$1 probe=$2 install=$3
+    if sudo -u "$SUDO_USER" bash -c "$probe" > /dev/null 2>&1; then
+        echo "  $name: already installed"
+        return
+    fi
+    echo "  $name: installing..."
+    sudo -u "$SUDO_USER" bash -c "$install"
+    if ! sudo -u "$SUDO_USER" bash -c "$probe" > /dev/null 2>&1; then
+        echo "  $name: installed, but '$probe' still fails" >&2
+        exit 1
+    fi
+}
+
+# Prints each path_additions entry missing from the PATH the user's interactive
+# shell assembles. The sentinel keeps anything the rc files print out of the
+# captured value.
+missing_path_additions() {
+    local user_path addition dir
+    user_path=$(sudo -u "$SUDO_USER" bash -ic 'printf "@@PATH@@%s\n" "$PATH"' \
+        < /dev/null 2> /dev/null | sed -n 's/^@@PATH@@//p')
+    if [ -z "$user_path" ]; then
+        echo "  PATH additions: could not read $SUDO_USER's interactive PATH" >&2
+        exit 1
+    fi
+    for addition in "${path_additions[@]}"; do
+        dir=$(
+            HOME=$USER_HOME
+            eval "printf '%s' $addition"
+        )
+        # Callers run this in $( ), where set -e is off, so check by hand.
+        if [ -z "$dir" ]; then
+            echo "  PATH additions: $addition expands to nothing" >&2
+            exit 1
+        fi
+        case ":$user_path:" in
+        *":$dir:"*) ;;
+        *) printf '%s\n' "$addition" ;;
+        esac
+    done
+}
+
 banner() {
     echo
     echo "==== $* ===="
@@ -617,13 +662,33 @@ else
     _wget "https://go.dev/dl/$latest"
     rm -rf /usr/local/go
     tar -C /usr/local -xzf "$latest"
-    # As the user: a root mkdir leaves ~/go root-owned and unwritable as GOPATH.
-    sudo -u "$SUDO_USER" mkdir -p "$USER_HOME"/go/{bin,pkg,src}
     rm "$latest"
     echo "  Go: $(/usr/local/go/bin/go version)"
 fi
 # Always ensure the Go bin dirs are on PATH, even if Go was already installed
-path_additions+=('/usr/local/go/bin' '"$GOPATH"/bin')
+path_additions+=('/usr/local/go/bin' '"$HOME"/go/bin')
+
+# GOPATH is written by `go install` run as the user, so it must be the user's on
+# every run, not only at Go install: a root mkdir leaves it root-owned for good.
+# Not recursive, so the module cache under pkg/ is never walked.
+for d in "$USER_HOME"/go "$USER_HOME"/go/{bin,pkg,src}; do
+    if [ -e "$d" ] && [ "$(stat -c %U "$d")" != "$SUDO_USER" ]; then
+        _chown "$SUDO_USER:$SUDO_USER" "$d"
+        echo "  Go: $d was not owned by $SUDO_USER; fixed"
+    fi
+done
+sudo -u "$SUDO_USER" mkdir -p "$USER_HOME"/go/{bin,pkg,src}
+
+# Language servers for the toolchains above, run from PATH by Claude Code's LSP
+# plugins; clangd is an apt package in the list above.
+declare -r NVM_LOAD='export NVM_DIR="$HOME"/.nvm && . "$NVM_DIR"/nvm.sh'
+lsp_server gopls '"$HOME"/go/bin/gopls version' \
+    '/usr/local/go/bin/go install golang.org/x/tools/gopls@latest'
+apt_block gopls gopls
+lsp_server rust-analyzer '"$HOME"/.cargo/bin/rust-analyzer --version' \
+    '"$HOME"/.cargo/bin/rustup component add rust-analyzer'
+lsp_server typescript-language-server "$NVM_LOAD && typescript-language-server --version" \
+    "$NVM_LOAD && npm install -g typescript typescript-language-server"
 
 # Installs to "$HOME"/.local/bin, which $path_additions already covers.
 if [ -x "$USER_HOME"/.local/bin/uv ]; then
@@ -1592,6 +1657,29 @@ else
     ) >> "$USER_RC"
     _chown "$SUDO_USER:$SUDO_USER" -R "$USER_HOME"/.bashrc
     installUser "$USER_HOME"/.config "$SCRIPT_DIR"/dotfiles/starship.toml
+fi
+
+# The block above is written once, but path_additions grows, so every entry is
+# also converged on its own against the PATH the user's shell really has.
+missing=$(missing_path_additions)
+if [ -z "$missing" ]; then
+    echo "  PATH additions: all on PATH"
+else
+    echo "  PATH additions: appending ${missing//$'\n'/ }"
+    (
+        echo
+        echo '# PATH additions dev_tools provision found missing from this file'
+        while IFS= read -r addition; do
+            echo "prepend_path $addition"
+        done <<< "$missing"
+        echo 'dedup_paths'
+    ) >> "$USER_RC"
+    _chown "$SUDO_USER:$SUDO_USER" "$USER_RC"
+    missing=$(missing_path_additions)
+    if [ -n "$missing" ]; then
+        echo "  PATH additions: still missing after appending: ${missing//$'\n'/ }" >&2
+        exit 1
+    fi
 fi
 
 declare -r SHELL_PREFS_BANNER='# Shell preferences'

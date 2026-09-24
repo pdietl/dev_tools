@@ -22,10 +22,21 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
   (generated, not copied, and may collect per-machine sections), `starship.toml`
   (installed inside the first-run-only bashrc block), nvim's `lazyvim.json`
   and `lazy-lock.json` (owned by `:LazyExtras` and `:Lazy`), and kitty's
-  `current-theme.conf` (owned by `kitten themes`). Tool installs stay
+  `current-theme.conf` (owned by `kitten themes`). The bashrc block's PATH
+  entries (`path_additions`) are the exception: each is also converged on
+  every run, judged by the PATH a fresh interactive shell of the user
+  assembles, and appended when missing, so an entry added here later still
+  reaches a machine whose bashrc predates it. Tool installs stay
   guarded on the tool being absent, so nothing here updates them, `bin/do_update`
-  included: it covers apt and snap only. A leaf tool installed from upstream
-  (starship, awscli, neovim, nix, kitty, tmux, google-drive-ocamlfuse) also has its
+  included: it covers apt and snap only. The language servers that Claude
+  Code's LSP plugins run from `PATH` are among them: gopls (`go install` into
+  `~/go/bin`), rust-analyzer (a rustup component) and typescript-language-server
+  (npm, into nvm's default node); clangd is an apt package. Their guard runs the
+  server rather than looking for a file, since rustup's `rust-analyzer` proxy
+  exists on `PATH` before the component that makes it work. `~/go` and its
+  `bin`/`pkg`/`src` are chowned back to the user on every run if they are not
+  the user's, non-recursively. A leaf tool installed from upstream
+  (starship, awscli, neovim, nix, kitty, tmux, google-drive-ocamlfuse, gopls) also has its
   apt packages blocked by `apt_block`, which writes a negative pin to
   `/etc/apt/preferences.d/upstream-<tool>` and reads it back through
   `apt-cache policy`; it refuses while an apt copy is still installed. The
