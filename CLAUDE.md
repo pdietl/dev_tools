@@ -102,8 +102,17 @@ Remote `git@github.com:pdietl/dev_tools.git`, branch `master`.
     picoprobe, WCH-Link, xgecu) plus two rules hiding volumes from GNOME's
     dock/Files: ZFS pool members, and NTFS on a fixed internal disk (a
     dual-boot Windows install); see `system/udev_rules/README.md`.
-  - **`system/apt/`** — apt drop-ins: NVIDIA unattended-upgrades hold, and the
-    `DPkg::Post-Invoke` hook that re-derives the Chrome VA-API desktop entry.
+  - **`system/apt/`** — apt drop-ins: the NVIDIA unattended-upgrades hold,
+    which also holds the kernel the driver is built for; a `DPkg::Post-Invoke`
+    hook running `nvidia-module-check` after every dpkg run; and the hook that
+    re-derives the Chrome VA-API desktop entry. `provision` installs the NVIDIA
+    pair only where the NVIDIA userspace driver is, and removes it elsewhere.
+  - **`system/nvidia-module-check/`** — `nvidia-module-check`, installed to
+    `/usr/local/sbin`: every kernel in `/boot` must have an `nvidia` module
+    matching the userspace driver. `provision` stops on a failure; the apt hook
+    sends an `ntfy` alert instead and never fails the transaction. The alert
+    goes through a root-owned copy of `bin/ntfy` in `/usr/local/sbin`, because
+    root must not run the user-writable one in `~/bin`.
   - **`system/chrome-vaapi/`** — `regenerate-chrome-vaapi-override`, installed
     to `/usr/local/sbin`. Sole owner of the VA-API launch flag and of the
     assertions guarding the desktop-entry copy; run by `provision` and by the
@@ -228,6 +237,17 @@ The leak behind it is mutter's, fixed upstream in 50.5 while Ubuntu 26.04
 ships 50.1. This install runs the local `50.1-0ubuntu2.4+pdietl1` from
 `system/mutter-backport/` (installed 2026-09-23); any archive mutter upgrade
 replaces it, so after one, run the check in the build script's header.
+
+### Kernel without its NVIDIA module
+Cursor trails and ghosting after a reboot, with `/proc/driver/nvidia/version`
+missing, mean the booted kernel has no NVIDIA module: the panel is on
+`simpledrm` with a software cursor. Each kernel needs its own
+`linux-modules-nvidia-*` package. `provision` upgrades with
+`--with-new-pkgs` and fails if any kernel in `/boot` lacks a module matching
+userspace. unattended-upgrades holds the kernel along with the NVIDIA stack,
+so kernel security updates wait for `do_update` or `provision`, and an apt
+hook sends an `ntfy` alert if any other path leaves a kernel without one.
+Suspend doc, section "Boot: a kernel without its NVIDIA module".
 
 ### External displays over USB-C / MST → `machine-notes/thinkpad-p16-gen3-ubuntu-external-displays.md`
 How DP Alt Mode lane count follows the monitor's USB-C data setting (and

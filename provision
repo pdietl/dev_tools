@@ -241,7 +241,10 @@ banner "Installing packages"
 echo "  Updating package lists..."
 _apt_get update
 echo "  Upgrading installed packages..."
-_apt_get upgrade -y
+# Each new kernel needs a new prebuilt NVIDIA module package, and a plain
+# upgrade holds back anything that needs a new package; this lets the kernel
+# and its module move together. It still never removes a package.
+_apt_get upgrade -y --with-new-pkgs
 echo "  Installing packages..."
 
 declare -a packages=(
@@ -1239,26 +1242,57 @@ if [ "$tmux_old_servers" -gt 0 ]; then
 fi
 
 # =============================================================================
-banner "NVIDIA driver: hold from unattended-upgrades"
+banner "NVIDIA driver: kernel modules and unattended-upgrades"
 # =============================================================================
 
-# A background unattended-upgrades bump of the NVIDIA stack leaves the running
-# kernel module older than the freshly-installed userspace until the next
-# reboot; on the P16 (Discrete mode, dGPU drives the panel) rebooting out of
-# that half-upgraded state wedged in the GPU teardown path and needed a hard
-# power-off (2026-07-24). The drop-in blacklists the stack from the automatic
-# path so it only moves during a deliberate `apt upgrade`. Inert without NVIDIA
-# packages; interactive apt is unaffected. See
-# thinkpad-p16-gen3-ubuntu-suspend.md.
-if in_wsl; then
-    echo "  NVIDIA unattended hold: skipped (WSL)"
-else
-    nvidia_hold_dest=/etc/apt/apt.conf.d/52nvidia-unattended-hold
-    if cmp -s "$SCRIPT_DIR"/system/apt/52nvidia-unattended-hold "$nvidia_hold_dest"; then
-        echo "  NVIDIA unattended hold: already current"
+# Only where the NVIDIA userspace driver is installed: a hold keeping the driver
+# and kernel out of unattended-upgrades, an apt hook alerting on any kernel left
+# without a matching module, and the same check failing this run.
+declare -r NVIDIA_CHECK=/usr/local/sbin/nvidia-module-check
+declare -r NVIDIA_HOLD=/etc/apt/apt.conf.d/52nvidia-unattended-hold
+declare -r NVIDIA_CHECK_HOOK=/etc/apt/apt.conf.d/54nvidia-module-check
+
+# Install repo file $1 as apt drop-in $2 unless it is already identical.
+install_apt_dropin() {
+    if cmp -s "$1" "$2"; then
+        echo "  $(basename "$2"): already current"
     else
-        _install -m 0644 "$SCRIPT_DIR"/system/apt/52nvidia-unattended-hold "$nvidia_hold_dest"
-        echo "  NVIDIA unattended hold: installed"
+        _install -m 0644 "$1" "$2"
+        echo "  $(basename "$2"): installed"
+    fi
+}
+
+if in_wsl; then
+    echo "  NVIDIA hold and module check: skipped (WSL)"
+else
+    _install -m 0755 "$SCRIPT_DIR"/system/nvidia-module-check/nvidia-module-check \
+        "$NVIDIA_CHECK"
+    # Only exit 1 means "no NVIDIA here"; reading any other failure that way
+    # would quietly remove the hold.
+    nvidia_rc=0
+    "$NVIDIA_CHECK" --installed || nvidia_rc=$?
+    if [ "$nvidia_rc" -gt 1 ]; then
+        echo "  nvidia-module-check --installed failed (exit $nvidia_rc)" >&2
+        exit 1
+    fi
+    if [ "$nvidia_rc" -eq 0 ]; then
+        # Root-owned copy for the hook: root must not run the user-writable one.
+        _install -m 0755 "$SCRIPT_DIR"/bin/ntfy /usr/local/sbin/ntfy
+        install_apt_dropin "$SCRIPT_DIR"/system/apt/52nvidia-unattended-hold "$NVIDIA_HOLD"
+        install_apt_dropin "$SCRIPT_DIR"/system/apt/54nvidia-module-check "$NVIDIA_CHECK_HOOK"
+        if ! "$NVIDIA_CHECK"; then
+            echo "  provision: stopping, a kernel lacks its NVIDIA module (above)" >&2
+            exit 1
+        fi
+    else
+        for f in "$NVIDIA_HOLD" "$NVIDIA_CHECK_HOOK"; do
+            if [ -e "$f" ]; then
+                rm -f "$f"
+                echo "  $(basename "$f"): removed (no NVIDIA userspace driver)"
+            else
+                echo "  $(basename "$f"): not needed (no NVIDIA userspace driver)"
+            fi
+        done
     fi
 fi
 

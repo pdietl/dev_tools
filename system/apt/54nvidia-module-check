@@ -1,0 +1,16 @@
+// After every dpkg run, check that each kernel in /boot has an NVIDIA module
+// matching the userspace driver, and send an ntfy alert if one does not.
+//
+// Why: the prebuilt module is a separate package per kernel, so any path that
+// installs a kernel without it leaves one that boots with the panel on the
+// firmware framebuffer. That stays invisible until the reboot, which can be
+// days later; this reports it in the run that caused it.
+//
+// Scope: detection only. It never fails the transaction, because the fix is
+// itself an apt run that has to be able to proceed. The alert names the host.
+//
+// Revert: rm this file, /usr/local/sbin/nvidia-module-check and
+// /usr/local/sbin/ntfy
+DPkg::Post-Invoke {
+    "if [ -x /usr/local/sbin/nvidia-module-check ]; then /usr/local/sbin/nvidia-module-check --alert || true; fi";
+};

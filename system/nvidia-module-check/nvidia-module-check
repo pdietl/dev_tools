@@ -1,0 +1,87 @@
+#!/bin/bash
+set -euo pipefail
+
+# Check that every kernel in /boot has an NVIDIA module whose version matches
+# the installed userspace driver.
+#
+# The prebuilt module is a separate package per kernel. A kernel booted
+# without one leaves the panel on the firmware framebuffer with a software
+# cursor; one booted with a mismatched module cannot bring the GPU up at all.
+# Nothing else looks between installing a kernel and rebooting into it.
+#
+# usage: nvidia-module-check              report; exit 1 if any kernel fails
+#        nvidia-module-check --alert      also send an ntfy alert on failure,
+#                                         and exit 0 (for an apt hook)
+#        nvidia-module-check --installed  exit 0 if an NVIDIA userspace
+#                                         driver is installed, 1 if not
+#
+# Revert: see /etc/apt/apt.conf.d/54nvidia-module-check.
+
+declare -r NTFY=/usr/local/sbin/ntfy
+
+# Upstream version of the installed NVIDIA GL library, e.g. 595.91.07.
+userspace_version() {
+    local status version
+    while read -r status version; do
+        if [ "$status" = ii ]; then
+            echo "${version%%-*}"
+            return 0
+        fi
+    done < <(dpkg-query -W -f='${db:Status-Abbrev} ${Version}\n' \
+        'libnvidia-gl-*' 2> /dev/null || true)
+    return 1
+}
+
+mode=report
+case "${1:-}" in
+    '') ;;
+    --alert) mode=alert ;;
+    --installed)
+        if userspace_version > /dev/null; then
+            exit 0
+        fi
+        exit 1
+        ;;
+    *)
+        echo "usage: $0 [--alert | --installed]" >&2
+        exit 2
+        ;;
+esac
+
+if ! user=$(userspace_version); then
+    echo "nvidia-module-check: skipped, no NVIDIA userspace driver installed"
+    exit 0
+fi
+
+checked=0
+bad=()
+for vmlinuz in /boot/vmlinuz-*; do
+    [ -e "$vmlinuz" ] || continue
+    kver=${vmlinuz#/boot/vmlinuz-}
+    checked=$((checked + 1))
+    kmod=$(modinfo -k "$kver" -F version nvidia 2> /dev/null) || kmod=none
+    if [ "$kmod" != "$user" ]; then
+        bad+=("$kver has $kmod")
+    fi
+done
+
+# An empty /boot is not a pass: on a ZFS root it can simply be unmounted.
+if [ "$checked" -eq 0 ]; then
+    msg="no kernels found in /boot; is it mounted?"
+elif [ ${#bad[@]} -eq 0 ]; then
+    echo "nvidia-module-check: $checked kernels, all have NVIDIA $user"
+    exit 0
+else
+    msg="NVIDIA userspace is $user, but $(printf '%s; ' "${bad[@]}")"
+    msg+="install the matching linux-modules-nvidia package before booting"
+    msg+=" those (apt-get upgrade --with-new-pkgs)"
+fi
+echo "nvidia-module-check: $msg" >&2
+
+if [ "$mode" = alert ]; then
+    if ! timeout 15 "$NTFY" "$(hostname): $msg" > /dev/null 2>&1; then
+        echo "nvidia-module-check: the ntfy alert could not be sent" >&2
+    fi
+    exit 0
+fi
+exit 1

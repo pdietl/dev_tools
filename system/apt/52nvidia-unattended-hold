@@ -1,4 +1,5 @@
-// Hold the NVIDIA driver stack out of unattended-upgrades.
+// Hold the NVIDIA driver stack, and the kernel it is built for, out of
+// unattended-upgrades.
 //
 // Why: when unattended-upgrades bumps the NVIDIA stack (driver + userspace +
 // kernel module) in the background, the *running* kernel module stays at the
@@ -9,9 +10,17 @@
 // packages means the driver only ever moves during a deliberate `apt upgrade`
 // that the user follows with a reboot.
 //
+// Kernels: the prebuilt NVIDIA module is a separate package per kernel, so
+// holding the stack alone lets unattended-upgrades install a new kernel with
+// no module for it, and the next boot puts the panel on the firmware
+// framebuffer. The kernel metapackages and every per-kernel image and module
+// package (the ZFS modules a ZFS root cannot boot without included) are held
+// with it, so a kernel and its modules only ever move together.
+//
 // Scope: this affects only the automatic (unattended-upgrades) path.
-// Interactive `apt upgrade` still updates NVIDIA normally. Inert on machines
-// with no NVIDIA packages installed.
+// Interactive `apt upgrade` still updates NVIDIA normally. provision installs
+// this only where the NVIDIA userspace driver is installed, since elsewhere
+// the kernel entries would hold kernels back for nothing.
 //
 // Pattern: unattended-upgrades matches each blacklist entry against the
 // package name ANCHORED AT THE START (re.match, and it builds an apt pin
@@ -20,11 +29,17 @@
 // the linux-{modules,objects,signatures,firmware}-nvidia-* packages — the
 // kernel module and GL/compute halves whose split causes the very hang above.
 // The leading ".*" is load-bearing: keep it. Do NOT "simplify" to "nvidia".
+// The kernel entries are plain prefixes for the same reason.
 //
-// Trade-off: background *security* updates to the NVIDIA stack are deferred
-// until a manual upgrade. Accepted: a wedged reboot is worse.
+// Trade-off: background *security* updates to the NVIDIA stack and to the
+// kernel are deferred until a manual upgrade. Accepted: a wedged reboot, or a
+// kernel that boots without its GPU driver, is worse.
 // Revert: delete this file.
 // Full incident writeup: thinkpad-p16-gen3-ubuntu-suspend.md
 Unattended-Upgrade::Package-Blacklist {
     ".*nvidia";
+    "linux-generic";
+    "linux-image-";
+    "linux-modules-";
+    "linux-main-modules-";
 };
